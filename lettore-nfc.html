@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Lettore NFC – Livith</title>
+<style>
+  :root { --brand: #e8771e; --ink: #1d232b; --muted: #6b7280; --bg: #f3f4f6; --ok: #15803d; --ok-bg: #dcfce7; --ko: #b91c1c; --ko-bg: #fee2e2; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); text-align: center; }
+  .brand { font-weight: 800; font-size: 20px; margin-bottom: 18px; }
+  .brand span { color: var(--brand); }
+  h1 { font-size: 21px; margin: 8px 0 6px; }
+  p { margin: 4px 0; color: var(--muted); max-width: 340px; }
+  .anim { position: relative; width: 190px; height: 190px; margin: 8px auto 12px; color: var(--brand); }
+  .anim .r { position: absolute; inset: 0; border-radius: 50%; border: 3px solid var(--brand); opacity: 0; animation: onda 1.8s ease-out infinite; }
+  .anim .r2 { animation-delay: .6s; }
+  .anim .r3 { animation-delay: 1.2s; }
+  @keyframes onda { 0% { transform: scale(.3); opacity: .9; } 100% { transform: scale(1); opacity: 0; } }
+  .anim svg { position: absolute; left: 50%; top: 50%; width: 62px; height: 100px; margin: -50px 0 0 -31px; animation: avvicina 1.8s ease-in-out infinite; }
+  @keyframes avvicina { 0%, 100% { transform: translateY(8px) rotate(-10deg); } 50% { transform: translateY(-8px) rotate(-10deg); } }
+  .ferma .r, .ferma svg { animation: none; }
+  .ferma .r { opacity: 0; }
+  .esito { width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; margin: 40px auto 18px; font-size: 42px; font-weight: 800; }
+  .esito.ok { background: var(--ok-bg); color: var(--ok); }
+  .esito.ko { background: var(--ko-bg); color: var(--ko); }
+  .codice { font: 600 17px ui-monospace, Menlo, Consolas, monospace; color: var(--ink); margin-top: 6px; word-break: break-all; }
+  .azioni { display: grid; gap: 10px; width: 100%; max-width: 340px; margin-top: 26px; }
+  button { font: inherit; font-weight: 700; border: 0; border-radius: 12px; height: 52px; cursor: pointer; }
+  .pieno { background: var(--brand); color: #fff; }
+  .vuoto { background: #fff; color: var(--ink); border: 1.5px solid #e3e5e8; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">Livit<span>h</span> · Ispezioni DPI</div>
+
+  <div class="anim" id="anim">
+    <span class="r"></span><span class="r r2"></span><span class="r r3"></span>
+    <svg viewBox="0 0 50 80" aria-hidden="true"><rect x="3" y="3" width="44" height="74" rx="9" fill="#fff" stroke="currentColor" stroke-width="4"/>
+      <path d="M18 30a8 8 0 0 1 0 14M24 25a15 15 0 0 1 0 24M30 20a22 22 0 0 1 0 34" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg>
+  </div>
+  <div class="esito" id="esito" hidden></div>
+
+  <h1 id="titolo">Avvicina il telefono al tag NFC</h1>
+  <p id="testo">Appoggia il retro del telefono sul tag e tienilo fermo un attimo.</p>
+  <div class="codice" id="codice"></div>
+
+  <div class="azioni">
+    <button type="button" class="pieno" id="btnAvvia" hidden>Attiva il lettore NFC</button>
+    <button type="button" class="vuoto" id="btnTorna">Annulla e torna all'app</button>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var par = new URLSearchParams(location.search);
+  var campo = par.get('campo') === 'nfc' ? 'nfc' : 'q';
+  var ritorno = par.get('ritorno') || '';
+  if (!/^https:\/\/script\.google\.com\//.test(ritorno)) ritorno = ''; // si torna solo all'app di Google
+  var ctrl = null, finito = false;
+
+  function stato(tipo, titolo, testo) {
+    $('anim').hidden = tipo !== 'attesa';
+    $('esito').hidden = tipo === 'attesa';
+    $('esito').className = 'esito ' + (tipo === 'ok' ? 'ok' : 'ko');
+    $('esito').textContent = tipo === 'ok' ? '✓' : '!';
+    $('titolo').textContent = titolo;
+    $('testo').textContent = testo || '';
+  }
+
+  function torna(valore) {
+    var aperto = window.opener && !window.opener.closed;
+    if (aperto) {
+      try {
+        window.opener.postMessage(valore ? { tipo: 'livith-nfc', valore: valore, campo: campo } : { tipo: 'livith-nfc-annulla' }, '*');
+        setTimeout(function () { window.close(); }, valore ? 700 : 50);
+      } catch (e) { aperto = false; }
+    }
+    if (!aperto) {
+      if (ritorno) location.href = ritorno + (valore ? '?nfc=' + encodeURIComponent(valore) + '&campo=' + campo : '');
+      else history.back();
+    }
+    // se la scheda non si chiude da sola
+    setTimeout(function () { $('btnTorna').textContent = 'Torna all\'app'; }, 1500);
+  }
+
+  function avvia() {
+    $('btnAvvia').hidden = true;
+    stato('attesa', 'Avvicina il telefono al tag NFC', 'Appoggia il retro del telefono sul tag e tienilo fermo un attimo.');
+    try {
+      ctrl = new AbortController();
+      var r = new NDEFReader();
+      r.onreading = function (ev) {
+        if (finito) return;
+        var v = String(ev.serialNumber || '').replace(/:/g, '').toLowerCase();
+        if (!v) { stato('ko', 'Tag senza codice', 'Questo tag non comunica il numero di serie: prova con un altro.'); return; }
+        finito = true;
+        try { ctrl.abort(); } catch (e) { /* ignora */ }
+        if (navigator.vibrate) navigator.vibrate(120);
+        stato('ok', 'Tag letto', 'Torno all\'app…');
+        $('codice').textContent = v;
+        torna(v);
+      };
+      r.onreadingerror = function () { stato('attesa', 'Tag non letto bene', 'Riprova: tieni il telefono fermo sul tag.'); };
+      r.scan({ signal: ctrl.signal }).catch(function (e) {
+        if (e && e.name === 'NotAllowedError') {
+          stato('ko', 'Serve il permesso NFC', 'Tocca il pulsante qui sotto e consenti l\'uso dell\'NFC.');
+          $('btnAvvia').hidden = false;
+        } else {
+          stato('ko', 'NFC non disponibile', (e && e.message ? e.message + '. ' : '') + 'Controlla che l\'NFC sia attivo nelle impostazioni del telefono.');
+          $('btnAvvia').hidden = false;
+        }
+      });
+    } catch (e) {
+      stato('ko', 'NFC non disponibile', 'Riprova con il pulsante qui sotto.');
+      $('btnAvvia').hidden = false;
+    }
+  }
+
+  $('btnAvvia').addEventListener('click', avvia);
+  $('btnTorna').addEventListener('click', function () { try { if (ctrl) ctrl.abort(); } catch (e) { /* ignora */ } torna(''); });
+
+  if (!('NDEFReader' in window)) {
+    stato('ko', 'Lettura NFC non supportata', 'Serve Chrome su un telefono Android con NFC attivo.');
+  } else {
+    avvia();
+  }
+})();
+</script>
+</body>
+</html>
