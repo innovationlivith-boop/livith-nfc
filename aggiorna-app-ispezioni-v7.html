@@ -1,0 +1,2533 @@
+<!DOCTYPE html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aggiorna App Ispezioni DPI (v7)</title>
+<style>
+:root{--brand:#e8771e;--ink:#1d232b;--muted:#6b7280;--line:#e3e5e8;--bg:#f3f4f6}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:820px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:22px;margin:0 0 4px} h1 span{color:var(--brand)} .sub{color:var(--muted);margin:0 0 18px}
+.card{background:#fff;border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+ol{margin:0;padding-left:22px} li{margin:6px 0} b{font-weight:650}
+.file{display:flex;align-items:center;gap:10px;margin-bottom:8px} .file h2{font-size:16px;margin:0;flex:1}
+button{font:inherit;font-weight:600;border:0;border-radius:10px;height:40px;padding:0 16px;background:var(--brand);color:#fff;cursor:pointer}
+textarea{width:100%;height:180px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;border:1.5px solid var(--line);border-radius:10px;padding:10px;background:#fafafa;color:var(--ink)}
+.note{font-size:13px;color:var(--muted)} code{background:var(--bg);padding:1px 6px;border-radius:6px}
+</style></head><body><main>
+<h1>Livit<span>h</span> · App Ispezioni DPI</h1>
+<p class="sub">I report restano in una cartella fissa del tuo Drive finché non li confermi dalla schermata <b>Report</b>; confermati, vanno in <b>REPORT TEMPORANEI</b> di magazzino. Contiene anche la fotocamera della v6. L'URL dell'app resta lo stesso.</p>
+<div class="card"><h2 style="font-size:16px;margin:0 0 6px">Cosa cambia</h2><ul style="margin:0;padding-left:20px">
+<li>I PDF delle ispezioni nuove non vanno più subito in REPORT TEMPORANEI: restano nella cartella fissa <b>REPORT DA CONFERMARE - App Ispezioni</b> nel tuo Drive (la crea l'app al primo salvataggio).</li>
+<li>Il pulsante in alto ora si chiama <b>Report</b> e il numero indica i report da confermare dell'ispettore scelto.</li>
+<li>Toccando un report: <b>Conferma e invia a magazzino</b>, <b>Modifica</b>, <b>Apri il PDF</b>, <b>Cancella</b>. In cima all'elenco c'è <b>Conferma tutti</b>.</li>
+<li>Confermato, il PDF passa nella cartella <b>REPORT TEMPORANEI</b> del Drive di magazzino e non si può più modificare né cancellare dall'app. La riga nel DATABASE si scrive già al salvataggio, come prima.</li>
+</ul></div>
+<div class="card"><ol>
+<li>Se non l'hai ancora fatto con la v6: su GitHub, nel repository <b>livith-nfc</b>, carica il nuovo <b>lettore-nfc.html</b> al posto del vecchio (Add file → Upload files → Commit changes).</li>
+<li>Apps Script: in <code>Codice.gs</code> seleziona tutto (Ctrl+A) e incolla <b>Code.gs</b>. Ha già dentro il tuo indirizzo del lettore NFC su GitHub.</li>
+<li>In <code>Index.html</code> seleziona tutto (Ctrl+A) e incolla <b>Index.html</b>.</li>
+<li>Salva (Ctrl+S) e pubblica: <b>Esegui il deployment → Gestisci deployment</b> → matita → <b>Nuova versione</b> → <b>Esegui il deployment</b>.</li>
+<li>Sui telefoni chiudi e riapri l'app.</li>
+</ol></div>
+<div class="card"><div class="file"><h2>1 · Code.gs</h2><button data-t="c1">Copia</button></div>
+<textarea id="c1" readonly spellcheck="false">/**
+ * APP ISPEZIONI DPI – Livith
+ * Web app Google Apps Script collegata a:
+ *  - Foglio Ispezioni_rev 3  (modello REPORT + elenchi clienti/modelli/controlli)
+ *  - DATABASE ISPEZIONI_rev 2 (Foglio1: una riga per ispezione)
+ *  - Cartella Drive dei PDF (la stessa usata dallo script &quot;stampa&quot;)
+ */
+const CFG = {
+  TEMPLATE_ID: &#x27;1dwzFuMibUBSf3jwVs20KmsbWDTP-WephLPPTdfONQKM&#x27;,
+  DB_ID: &#x27;1XsX-rfYIixt_mRd7-eZDaImz3ysIuuLhhyYCHu_HXGs&#x27;,
+  DB_SHEET: &#x27;Foglio1&#x27;,
+  PDF_FOLDER_ID: &#x27;1uPlu9EfBRnNAfoMVB_yC8aVmuIvqtgBx&#x27;, // REPORT TEMPORANEI (Drive di magazzino): ci vanno i report confermati
+  // Cartella fissa nel tuo Drive per i report da confermare. Vuoto = la crea l&#x27;app
+  // (&quot;REPORT DA CONFERMARE - App Ispezioni&quot; nel Mio Drive); oppure metti qui l&#x27;ID di una cartella tua.
+  CARTELLA_REPORT_ID: &#x27;&#x27;,
+  TZ: &#x27;Europe/Rome&#x27;,
+  DB_FIRST_ROW: 3,
+  MAX_FOTO: 4,
+  // Indirizzo della pagina lettore-nfc.html pubblicata su un sito (es. &#x27;https://www.livith.it/nfc/lettore-nfc.html&#x27;).
+  // Vuoto = pulsante NFC non ancora attivo (la fotocamera funziona comunque).
+  NFC_PAGINA: &#x27;https://innovationlivith-boop.github.io/livith-nfc/lettore-nfc.html&#x27;
+};
+
+// Categoria -&gt; righe del blocco in SCHEDA CONTROLLI (stessa mappa di MENU.gs / copiadati.gs)
+const MAPPA_CONTROLLI = {
+  &#x27;RVCRD&#x27;: [3, 10],
+  &#x27;RVCRD00&#x27;: [12, 21],
+  &#x27;RVCRDAS00&#x27;: [24, 33],
+  &#x27;RVFG00&#x27;: [37, 48],
+  &#x27;RVFG01&#x27;: [37, 48],
+  &#x27;RVFTT00&#x27;: [49, 56],
+  &#x27;RVIMB00&#x27;: [58, 67],
+  &#x27;REVIMB00&#x27;: [58, 67],
+  &#x27;RVIMB03&#x27;: [58, 67],
+  &#x27;RVIMB01&#x27;: [71, 81],
+  &#x27;RVIMB02&#x27;: [71, 81],
+  &#x27;RVLVTM&#x27;: [86, 95],
+  &#x27;RVMNB&#x27;: [98, 103],
+  &#x27;RVASTT&#x27;: [98, 103],
+  &#x27;RVMK00&#x27;: [107, 114],
+  &#x27;RVRTTS01&#x27;: [116, 130],
+  &#x27;RVDSLY&#x27;: [146, 153],
+  &#x27;RVCK00&#x27;: [155, 165],
+  &#x27;RVBRL&#x27;: [169, 181],
+  &#x27;REVBSDVT&#x27;: [193, 201],
+  &#x27;ISPEZIONE PIANTANA&#x27;: [202, 210],
+  &#x27;RVDVB3ES&#x27;: [211, 219],
+  &#x27;RVDVBFES&#x27;: [211, 219],
+  &#x27;RVSTXTR&#x27;: [220, 225],
+  &#x27;RVTRP2&#x27;: [226, 234],
+  &#x27;RVCRR&#x27;: [235, 240],
+  &#x27;REVB3P&#x27;: [241, 248],
+  &#x27;RVRTMT01&#x27;: [250, 258],
+  &#x27;RVRTMT02&#x27;: [250, 258],
+  &#x27;RVDISC&#x27;: [259, 267],
+  &#x27;ISP31753-02&#x27;: [278, 287],
+  &#x27;RVDSGK&#x27;: [278, 287],
+  &#x27;RVBRLFR71&#x27;: [288, 302],
+  &#x27;RVVRR01&#x27;: [303, 312],
+  &#x27;RVVRR02&#x27;: [303, 312],
+  &#x27;RVRTRC00&#x27;: [313, 323],
+  &#x27;REVFIX&#x27;: [324, 329],
+  &#x27;REV16104&#x27;: [330, 338],
+  &#x27;RVDSEDE&#x27;: [340, 351]
+};
+
+/* ------------------------------------------------------------------ */
+/* WEB APP                                                             */
+/* ------------------------------------------------------------------ */
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile(&#x27;Index&#x27;)
+    .setTitle(&#x27;Ispezioni DPI – Livith&#x27;)
+    .addMetaTag(&#x27;viewport&#x27;, &#x27;width=device-width, initial-scale=1, viewport-fit=cover&#x27;);
+}
+
+/** Elenchi per i menu dell&#x27;app + controlli per ogni categoria. */
+function getBootstrap() {
+  const ss = SpreadsheetApp.openById(CFG.TEMPLATE_ID);
+
+  // Ispettori + clienti/agenti (LISTA ISPETTORI)
+  const shIsp = ss.getSheetByName(&#x27;LISTA ISPETTORI&#x27;);
+  const isp = leggi_(shIsp, 2, 1, 7);
+  const ispettori = [];
+  const clienti = [];
+  const visti = {};
+  isp.forEach(function (r) {
+    if (r[0] &amp;&amp; r[1]) ispettori.push({ codice: r[0].trim(), nome: r[1].trim() });
+    const c = (r[3] || &#x27;&#x27;).trim();
+    if (c &amp;&amp; !visti[c.toUpperCase()]) {
+      visti[c.toUpperCase()] = 1;
+      clienti.push({ nome: c, agente: (r[5] || &#x27;&#x27;).trim(), email: (r[6] || &#x27;&#x27;).trim() });
+    }
+  });
+
+  // Produttori
+  const produttori = unici_(leggi_(ss.getSheetByName(&#x27;DATI_PRODUTTORE_DPI&#x27;), 2, 1, 1)
+    .map(function (r) { return r[0].trim(); })
+    .filter(function (v) { return v &amp;&amp; v.indexOf(&#x27;INSERISCI&#x27;) !== 0; }));
+
+  // Modelli (B) + anni di vita (C) e categorie (K)
+  const shMod = ss.getSheetByName(&#x27;DATI_MODELLO&#x27;);
+  const modelli = [];
+  const vistiM = {};
+  leggi_(shMod, 2, 2, 2).forEach(function (r) {
+    const n = r[0].trim();
+    if (!n || n.indexOf(&#x27;INSERISCI&#x27;) === 0 || vistiM[n.toUpperCase()]) return;
+    vistiM[n.toUpperCase()] = 1;
+    modelli.push({ nome: n, anni: (r[1] || &#x27;&#x27;).trim() });
+  });
+  const categorie = unici_(shMod.getRange(&#x27;K1:K80&#x27;).getDisplayValues()
+    .map(function (r) { return r[0].replace(/\s+/g, &#x27; &#x27;).trim(); })
+    .filter(String));
+
+  // Controlli per categoria (SCHEDA CONTROLLI, colonne L = numero, N = descrizione)
+  const shSc = ss.getSheetByName(&#x27;SCHEDA CONTROLLI&#x27;);
+  const sc = shSc.getRange(1, 12, Math.max(shSc.getLastRow(), 360), 3).getDisplayValues();
+  const controlli = {};
+  categorie.forEach(function (cat) {
+    const blk = bloccoControlli_(cat);
+    controlli[cat] = blk ? estraiControlli_(sc, blk) : [];
+  });
+
+  return {
+    ispettori: ispettori,
+    clienti: clienti,
+    produttori: produttori,
+    modelli: modelli,
+    categorie: categorie,
+    controlli: controlli,
+    storico: storicoCombinazioni_(),
+    urlApp: urlApp_(),
+    nfcPagina: CFG.NFC_PAGINA
+  };
+}
+
+/**
+ * Combinazioni [produttore, categoria, modello, n. ispezioni] già presenti nel DATABASE.
+ * Servono a suggerire i modelli in base a produttore e categoria scelti.
+ */
+function storicoCombinazioni_() {
+  try {
+    const sh = SpreadsheetApp.openById(CFG.DB_ID).getSheetByName(CFG.DB_SHEET);
+    const last = sh.getLastRow();
+    if (last &lt; CFG.DB_FIRST_ROW) return [];
+    const cnt = {};
+    sh.getRange(CFG.DB_FIRST_ROW, 4, last - CFG.DB_FIRST_ROW + 1, 4).getDisplayValues().forEach(function (r) {
+      const p = r[0].trim(), m = r[1].trim(), c = r[3].replace(/\s+/g, &#x27; &#x27;).trim();
+      if (!p || !m || p === &#x27;-&#x27; || m === &#x27;-&#x27;) return;
+      const k = p.toUpperCase() + &#x27;|&#x27; + c.toUpperCase() + &#x27;|&#x27; + m.toUpperCase();
+      if (!cnt[k]) cnt[k] = [p, c, m, 0];
+      cnt[k][3]++;
+    });
+    return Object.keys(cnt).map(function (k) { return cnt[k]; })
+      .sort(function (a, b) { return b[3] - a[3]; });
+  } catch (e) {
+    return []; // i suggerimenti sono facoltativi
+  }
+}
+
+/** Indirizzo dell&#x27;app (serve alla pagina del lettore NFC per tornare qui). */
+function urlApp_() {
+  try { return ScriptApp.getService().getUrl(); } catch (e) { return &#x27;&#x27;; }
+}
+
+/**
+ * Cerca le ispezioni precedenti: il testo può essere un codice NFC / DataMatrix (col. U) o un numero di serie (col. F).
+ * q.alternative: altri testi da provare (es. numero di serie ricavato da un DataMatrix).
+ */
+function cercaDispositivo(q) {
+  q = q || {};
+  const cand = [q.testo || q.nfc || q.seriale].concat(q.alternative || [])
+    .map(norm_).filter(function (x, i, a) { return x &amp;&amp; x !== &#x27;-&#x27; &amp;&amp; x.length &gt;= 2 &amp;&amp; a.indexOf(x) === i; });
+  if (!cand.length) {
+    throw new Error(&#x27;Inserisci un codice NFC o un numero di serie.&#x27;);
+  }
+  const sh = SpreadsheetApp.openById(CFG.DB_ID).getSheetByName(CFG.DB_SHEET);
+  const last = sh.getLastRow();
+  if (last &lt; CFG.DB_FIRST_ROW) return { risultati: [] };
+  const vals = sh.getRange(CFG.DB_FIRST_ROW, 1, last - CFG.DB_FIRST_ROW + 1, 21).getDisplayValues();
+  const out = [];
+  for (let i = 0; i &lt; vals.length &amp;&amp; out.length &lt; 80; i++) {
+    const r = vals[i];
+    if (cand.indexOf(norm_(r[20])) &gt;= 0 || cand.indexOf(norm_(r[5])) &gt;= 0) out.push(recordDaRiga_(r));
+  }
+  return { risultati: out };
+}
+
+/** Ispezioni dello stesso DPI (stesso ID o stesso tag NFC) nello stesso anno della data ispezione. */
+function cercaDoppioni_(d, sh) {
+  sh = sh || SpreadsheetApp.openById(CFG.DB_ID).getSheetByName(CFG.DB_SHEET);
+  const last = sh.getLastRow();
+  if (last &lt; CFG.DB_FIRST_ROW) return [];
+  const n = last - CFG.DB_FIRST_ROW + 1;
+  // Cerca solo nelle colonne T (ID) e U (NFC): molto più veloce che leggere tutto il DATABASE
+  const righe = {};
+  [[20, String(d.id || &#x27;&#x27;).trim()], [21, d.nfc]].forEach(function (x) {
+    if (!x[1]) return;
+    sh.getRange(CFG.DB_FIRST_ROW, x[0], n, 1).createTextFinder(x[1]).matchEntireCell(true).matchCase(false)
+      .findAll().forEach(function (c) { righe[c.getRow()] = 1; });
+  });
+  const anno = String(d.dataIsp.getFullYear());
+  const out = [];
+  Object.keys(righe).map(Number).sort(function (a, b) { return a - b; }).slice(0, 30).some(function (row) {
+    const r = sh.getRange(row, 1, 1, 21).getDisplayValues()[0];
+    const m = /\b(\d{4})\b/.exec(String(r[2]));
+    if (m &amp;&amp; m[1] === anno) out.push({ data: r[2], esito: r[7], ispettore: r[14] });
+    return out.length &gt;= 5;
+  });
+  return out;
+}
+
+/**
+ * Salva l&#x27;ispezione nel DATABASE (pochi secondi).
+ * Il PDF lo crea creaPdfIspezione, che l&#x27;app chiama subito dopo: intanto l&#x27;ispettore può proseguire.
+ */
+function salvaIspezione(p) {
+  const d = preparaDati_(p);
+  const mod = String(p.modificaDi || &#x27;&#x27;); // nome file dell&#x27;ispezione da correggere (modifica)
+  if (mod) verificaTemp_(mod);
+  const sh = SpreadsheetApp.openById(CFG.DB_ID).getSheetByName(CFG.DB_SHEET);
+
+  // 0) Avviso doppione: stesso DPI già ispezionato nello stesso anno -&gt; chiede conferma (non in modifica)
+  if (!p.confermaDoppione &amp;&amp; !mod) {
+    const dup = cercaDoppioni_(d, sh);
+    if (dup.length) return { doppione: dup, anno: d.dataIsp.getFullYear() };
+  }
+
+  // 1) Riga nel DATABASE (stessa logica dello script &quot;stampa&quot;); in modifica si riscrive la riga esistente
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    let row = 5;
+    if (mod) {
+      row = rigaDaNomeFile_(sh, mod);
+      if (!row) throw new Error(&#x27;Non trovo questa ispezione nel DATABASE: forse è già stata cancellata.&#x27;);
+      const vecchioId = sh.getRange(row, 20).getDisplayValue();
+      d.nIspezioni = contaIspezioni_(sh, d.id) + (norm_(vecchioId) === norm_(d.id) ? 0 : 1);
+    } else {
+      d.nIspezioni = contaIspezioni_(sh, d.id) + 1;
+    }
+    const riga = [
+      d.cliente, d.utilizzatore, d.dataIsp, d.produttore, d.modello, d.seriale,
+      d.categoria, d.esito, d.dataProd, d.durataVal, d.primo, d.prossima,
+      d.nIspezioni, d.scadenza, Number(d.ispettore) || d.ispettore, &#x27;&#x27;,
+      d.agente, d.emailAgente, d.nomeFile, d.id, d.nfc
+    ];
+    sh.getRange(row, 6).setNumberFormat(&#x27;@&#x27;);
+    sh.getRange(row, 1, 1, riga.length).setValues([riga]);
+    sh.getRange(row, 16).setFormula(&#x27;=L&#x27; + row + &#x27;-V$2&#x27;);
+    if (!mod) sh.insertRowBefore(5);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+
+  return {
+    ok: true,
+    nomeFile: d.nomeFile,
+    esito: d.esito,
+    prossima: d.prossima instanceof Date ? fmt_(d.prossima) : String(d.prossima),
+    scadenza: d.scadenza instanceof Date ? fmt_(d.scadenza) : String(d.scadenza),
+    nIspezioni: d.nIspezioni,
+    modifica: !!mod
+  };
+}
+
+/** Crea il PDF dell&#x27;ispezione. L&#x27;app la chiama subito dopo salvaIspezione, in secondo piano. */
+function creaPdfIspezione(p) {
+  const d = preparaDati_(p);
+  const pdf = creaPdf_(d, p.foto || []);
+  try {
+    salvaDati_(d.nomeFile, p); // serve per poterla riaprire e modificare finché il PDF è nella cartella temporanea
+    const vecchio = String(p.modificaDi || &#x27;&#x27;);
+    if (vecchio &amp;&amp; vecchio !== d.nomeFile) cestinaIspezione_(vecchio); // modifica: via il PDF vecchio
+  } catch (e) {
+    console.warn(&#x27;Dati per modifica non salvati: &#x27; + e.message);
+  }
+  return { ok: true, pdfUrl: pdf.getUrl(), pdfNome: pdf.getName() };
+}
+
+/* ------------------------------------------------------------------ */
+/* REPORT: da confermare (modificabili / cancellabili) -&gt; confermati  */
+/* (i confermati vanno in REPORT TEMPORANEI di magazzino)              */
+/* ------------------------------------------------------------------ */
+
+/** Report da confermare: ispezioni fatte con l&#x27;app il cui PDF è ancora nella cartella fissa (dell&#x27;ispettore scelto, se indicato). */
+function elencoIspezioni(ispettore) {
+  const pdf = {};
+  const it = cartellaReport_().getFiles();
+  while (it.hasNext()) {
+    const f = it.next(), n = f.getName();
+    if (/\.pdf$/i.test(n)) pdf[n.slice(0, -4)] = f.getUrl();
+  }
+  const nomi = [];
+  const scaduti = Date.now() - 15 * 60000;
+  const it2 = cartellaDati_().getFiles();
+  while (it2.hasNext()) {
+    const f = it2.next(), n = f.getName().replace(/\.json$/i, &#x27;&#x27;);
+    if (pdf[n]) nomi.push(n);
+    else if (f.getDateCreated().getTime() &lt; scaduti) f.setTrashed(true); // PDF già uscito dalla cartella: non serve più
+  }
+  if (!nomi.length) return [];
+
+  const sh = SpreadsheetApp.openById(CFG.DB_ID).getSheetByName(CFG.DB_SHEET);
+  const last = sh.getLastRow();
+  if (last &lt; CFG.DB_FIRST_ROW) return [];
+  // Le ispezioni nuove sono in alto: bastano le prime righe
+  const perNome = {};
+  sh.getRange(CFG.DB_FIRST_ROW, 1, Math.min(500, last - CFG.DB_FIRST_ROW + 1), 21).getDisplayValues()
+    .forEach(function (r) { if (r[18]) perNome[r[18]] = r; });
+  const isp = String(ispettore || &#x27;&#x27;).trim();
+  const out = [];
+  nomi.forEach(function (n) {
+    let r = perNome[n];
+    if (!r) {
+      const row = rigaDaNomeFile_(sh, n);
+      if (row) r = sh.getRange(row, 1, 1, 21).getDisplayValues()[0];
+    }
+    if (!r || (isp &amp;&amp; !stessoIspettore_(r[14], isp))) return;
+    out.push({ nomeFile: n, pdfUrl: pdf[n], cliente: r[0], modello: r[4], seriale: r[5], data: r[2],
+      esito: r[7], categoria: r[6], ispettore: r[14], ora: oraDaNome_(n) });
+  });
+  return out.sort(function (a, b) { return a.ora &lt; b.ora ? 1 : a.ora &gt; b.ora ? -1 : 0; });
+}
+
+/** Dati completi di un&#x27;ispezione per riaprirla nel modulo. */
+function apriIspezione(nome) {
+  verificaTemp_(nome);
+  const it = cartellaDati_().getFilesByName(nome + &#x27;.json&#x27;);
+  if (!it.hasNext()) throw new Error(&quot;Dati dell&#x27;ispezione non trovati.&quot;);
+  const p = JSON.parse(it.next().getBlob().getDataAsString(&#x27;UTF-8&#x27;));
+  p.nomeFile = nome;
+  return p;
+}
+
+/** Cancella la riga nel DATABASE e il PDF. */
+function eliminaIspezione(nome) {
+  verificaTemp_(nome);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const sh = SpreadsheetApp.openById(CFG.DB_ID).getSheetByName(CFG.DB_SHEET);
+    const row = rigaDaNomeFile_(sh, nome);
+    if (row) sh.deleteRow(row);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  cestinaIspezione_(nome);
+  return { ok: true };
+}
+
+/**
+ * Conferma i report: il PDF passa nella cartella REPORT TEMPORANEI di magazzino e non si può più modificare.
+ * nomi: elenco dei nomi file (senza .pdf). Restituisce quanti sono stati confermati e gli eventuali errori.
+ */
+function confermaIspezioni(nomi) {
+  nomi = [].concat(nomi || []);
+  const temp = cartellaReport_();
+  const dest = DriveApp.getFolderById(CFG.PDF_FOLDER_ID);
+  const errori = [];
+  let fatti = 0;
+  nomi.forEach(function (nome) {
+    try {
+      const it = temp.getFilesByName(nome + &#x27;.pdf&#x27;);
+      if (!it.hasNext()) throw new Error(&#x27;non è più tra i report da confermare&#x27;);
+      const f = it.next();
+      try {
+        f.moveTo(dest);
+      } catch (e) { // se lo spostamento non è permesso: copia in magazzino e cestina l&#x27;originale
+        f.makeCopy(f.getName(), dest);
+        f.setTrashed(true);
+      }
+      while (it.hasNext()) it.next().setTrashed(true); // eventuali doppioni
+      const it2 = cartellaDati_().getFilesByName(nome + &#x27;.json&#x27;);
+      while (it2.hasNext()) it2.next().setTrashed(true); // da qui non è più modificabile
+      fatti++;
+    } catch (e) {
+      errori.push(String(nome).split(&#x27;_&#x27;).slice(1, 3).join(&#x27; · &#x27;) + &#x27;: &#x27; + e.message);
+    }
+  });
+  return { confermati: fatti, errori: errori };
+}
+
+/** Cartella fissa (nel Drive di chi ha pubblicato l&#x27;app) con i report da confermare. */
+function cartellaReport_() {
+  if (CFG.CARTELLA_REPORT_ID) return DriveApp.getFolderById(CFG.CARTELLA_REPORT_ID);
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty(&#x27;CARTELLA_REPORT&#x27;);
+  if (id) {
+    try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) { /* la ricreo */ }
+  }
+  const f = DriveApp.getRootFolder().createFolder(&#x27;REPORT DA CONFERMARE - App Ispezioni&#x27;);
+  props.setProperty(&#x27;CARTELLA_REPORT&#x27;, f.getId());
+  return f;
+}
+
+/** Cartella dove l&#x27;app tiene i dati completi di ogni ispezione (controlli, note, foto) per poterla modificare. */
+function cartellaDati_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty(&#x27;CARTELLA_DATI&#x27;);
+  if (id) {
+    try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) { /* la ricreo */ }
+  }
+  const f = DriveApp.getRootFolder().createFolder(&#x27;App Ispezioni - dati per le modifiche (non toccare)&#x27;);
+  props.setProperty(&#x27;CARTELLA_DATI&#x27;, f.getId());
+  return f;
+}
+
+function salvaDati_(nome, p) {
+  const dati = {};
+  Object.keys(p).forEach(function (k) { if (k !== &#x27;modificaDi&#x27; &amp;&amp; k !== &#x27;confermaDoppione&#x27;) dati[k] = p[k]; });
+  const cartella = cartellaDati_();
+  const it = cartella.getFilesByName(nome + &#x27;.json&#x27;);
+  while (it.hasNext()) it.next().setTrashed(true);
+  cartella.createFile(nome + &#x27;.json&#x27;, JSON.stringify(dati), &#x27;application/json&#x27;);
+}
+
+function verificaTemp_(nome) {
+  if (!cartellaReport_().getFilesByName(nome + &#x27;.pdf&#x27;).hasNext()) {
+    throw new Error(&#x27;Questo report è già stato confermato (è in REPORT TEMPORANEI): non si può più modificare né cancellare.&#x27;);
+  }
+}
+
+function cestinaIspezione_(nome) {
+  const it = cartellaReport_().getFilesByName(nome + &#x27;.pdf&#x27;);
+  while (it.hasNext()) it.next().setTrashed(true);
+  const it2 = cartellaDati_().getFilesByName(nome + &#x27;.json&#x27;);
+  while (it2.hasNext()) it2.next().setTrashed(true);
+}
+
+function rigaDaNomeFile_(sh, nome) {
+  const last = sh.getLastRow();
+  if (last &lt; CFG.DB_FIRST_ROW) return 0;
+  const c = sh.getRange(CFG.DB_FIRST_ROW, 19, last - CFG.DB_FIRST_ROW + 1, 1)
+    .createTextFinder(nome).matchEntireCell(true).findNext();
+  return c ? c.getRow() : 0;
+}
+
+function stessoIspettore_(a, b) {
+  a = String(a).trim(); b = String(b).trim();
+  return a === b || (!isNaN(Number(a)) &amp;&amp; a !== &#x27;&#x27; &amp;&amp; Number(a) === Number(b));
+}
+
+/** &#x27;CLIENTE_MODELLO_SERIE_18/11/2026_16:21:58&#x27; -&gt; &#x27;2026-11-18 16:21&#x27; (per ordinare e mostrare l&#x27;ora). */
+function oraDaNome_(n) {
+  const m = /(\d{2})\/(\d{2})\/(\d{4})_(\d{2}):(\d{2}):(\d{2})$/.exec(n);
+  return m ? m[3] + &#x27;-&#x27; + m[2] + &#x27;-&#x27; + m[1] + &#x27; &#x27; + m[4] + &#x27;:&#x27; + m[5] : &#x27;&#x27;;
+}
+
+/* ------------------------------------------------------------------ */
+/* LOGICA                                                              */
+/* ------------------------------------------------------------------ */
+
+function preparaDati_(p) {
+  p = p || {};
+  const req = { cliente: &#x27;Cliente&#x27;, produttore: &#x27;Produttore&#x27;, modello: &#x27;Modello&#x27;, seriale: &#x27;Numero di serie&#x27;, categoria: &#x27;Categoria&#x27;, ispettore: &#x27;Ispettore&#x27; };
+  Object.keys(req).forEach(function (k) {
+    if (!String(p[k] || &#x27;&#x27;).trim()) throw new Error(&#x27;Campo obbligatorio mancante: &#x27; + req[k]);
+  });
+
+  const d = {};
+  d.cliente = up_(p.cliente);
+  d.utilizzatore = up_(p.utilizzatore) || &#x27;-&#x27;;
+  d.produttore = up_(p.produttore);
+  d.modello = up_(p.modello);
+  d.seriale = String(p.seriale).trim().toUpperCase();
+  d.categoria = String(p.categoria).trim();
+  d.nfc = String(p.nfc || &#x27;&#x27;).trim().toLowerCase();
+  d.ispettore = String(p.ispettore).trim();
+  d.note = String(p.note || &#x27;&#x27;).trim();
+  d.dataIsp = dataISO_(p.dataIspezione) || oggi_();
+  d.dataProd = dataISO_(p.dataProduzione) || &#x27;-&#x27;;
+  d.primoDiverso = !!p.primoUtilizzoDiverso;
+  d.primo = d.primoDiverso ? (dataISO_(p.dataPrimoUtilizzo) || &#x27;-&#x27;) : d.dataProd;
+  d.durata = String(p.durata || &#x27;&#x27;).trim() || &#x27;10&#x27;;
+  d.durataVal = d.durata === &#x27;∞&#x27; ? &#x27;∞&#x27; : (Number(d.durata) || d.durata);
+
+  // Scadenza = primo utilizzo + anni di vita (come aggiornaO22)
+  if (d.durata === &#x27;∞&#x27;) d.scadenza = &#x27;∞&#x27;;
+  else if (d.primo instanceof Date &amp;&amp; !isNaN(parseInt(d.durata, 10))) {
+    d.scadenza = new Date(d.primo);
+    d.scadenza.setFullYear(d.scadenza.getFullYear() + parseInt(d.durata, 10));
+  } else d.scadenza = &#x27;-&#x27;;
+
+  // Controlli
+  const blk = bloccoControlli_(d.categoria);
+  d.blocco = blk;
+  d.esiti = {};
+  (p.controlli || []).forEach(function (c) {
+    const off = Number(c.offset);
+    if (off &gt;= 0 &amp;&amp; off &lt; 20 &amp;&amp; (c.esito === &#x27;✔&#x27; || c.esito === &#x27;X&#x27;)) d.esiti[off] = c.esito;
+  });
+  const valori = Object.keys(d.esiti).map(function (k) { return d.esiti[k]; });
+  const nControlli = (p.controlli || []).length;
+
+  // Esito (come MENU.gs: X =&gt; FUORI SERVIZIO, tutti ✔ =&gt; OK; scaduto =&gt; FUORI SERVIZIO)
+  let esito;
+  if (valori.indexOf(&#x27;X&#x27;) &gt;= 0) esito = &#x27;FUORI SERVIZIO&#x27;;
+  else if (d.scadenza instanceof Date &amp;&amp; d.scadenza &lt; d.dataIsp) esito = &#x27;FUORI SERVIZIO&#x27;;
+  else if (nControlli &gt; 0 &amp;&amp; valori.length === nControlli) esito = &#x27;OK&#x27;;
+  else if (nControlli === 0 &amp;&amp; (p.esitoManuale === &#x27;OK&#x27; || p.esitoManuale === &#x27;FUORI SERVIZIO&#x27;)) esito = p.esitoManuale;
+  else throw new Error(&#x27;Completa tutti i controlli prima di salvare.&#x27;);
+  d.esito = esito;
+
+  // Prossima ispezione = data ispezione + mesi (formula del REPORT: E9 + 30,4166 * Q33)
+  d.mesi = Math.min(Math.max(parseInt(p.mesi, 10) || 12, 1), 12);
+  if (esito === &#x27;FUORI SERVIZIO&#x27;) {
+    d.prossima = &#x27;/&#x27;;
+    d.mesiVal = &#x27;/&#x27;;
+  } else {
+    d.prossima = new Date(d.dataIsp.getTime() + Math.round(30.4166666666666 * d.mesi) * 86400000);
+    d.mesiVal = d.mesi;
+  }
+
+  // Agente dal cliente (LISTA ISPETTORI D -&gt; F, G)
+  const ag = agentePerCliente_(d.cliente);
+  d.agente = ag.agente;
+  d.emailAgente = ag.email;
+
+  d.id = d.cliente + d.modello + d.seriale; // come AF19
+  d.nomeFile = d.cliente + &#x27;_&#x27; + d.modello + &#x27;_&#x27; + d.seriale + &#x27;_&#x27; +
+    Utilities.formatDate(p.ts ? new Date(Number(p.ts)) : new Date(), CFG.TZ, &#x27;dd/MM/yyyy_HH:mm:ss&#x27;); // come AD19
+  return d;
+}
+
+function creaPdf_(d, foto) {
+  // Un unico file &quot;motore&quot; (copia del modello creata una volta sola) invece di una copia per ogni
+  // ispezione: si risparmiano ~12 secondi. Il mutex fa lavorare un PDF alla volta.
+  return conMutexPdf_(function () {
+    const m = motore_();
+    const ss = m.ss;
+    const sh = ss.getSheetByName(&#x27;REPORT&#x27;);
+
+    sh.getRange(&#x27;E9&#x27;).setValue(d.dataIsp);
+    sh.getRange(&#x27;O9&#x27;).setValue(d.categoria);
+    sh.getRange(&#x27;F12&#x27;).setValue(d.cliente);
+    sh.getRange(&#x27;F13&#x27;).setValue(d.utilizzatore);
+    sh.getRange(&#x27;F15&#x27;).setValue(d.produttore);
+    sh.getRange(&#x27;F16&#x27;).setValue(d.modello);
+    sh.getRange(&#x27;F17&#x27;).setNumberFormat(&#x27;@&#x27;).setValue(d.seriale);
+    sh.getRange(&#x27;F19&#x27;).setValue(d.dataProd);
+    sh.getRange(&#x27;J20&#x27;).setValue(d.primoDiverso);
+    sh.getRange(&#x27;O20&#x27;).setValue(d.primo);
+    sh.getRange(&#x27;J22&#x27;).setValue(d.durataVal);
+    sh.getRange(&#x27;O22&#x27;).setValue(d.scadenza);
+
+    // Controlli: copia il blocco da SCHEDA CONTROLLI (L:AI -&gt; B60:Y) come lo script attuale
+    sh.getRange(&#x27;B60:Y79&#x27;).clearContent();
+    const esitiRiga = new Array(20).fill(&#x27;&#x27;);
+    if (d.blocco) {
+      const n = d.blocco[1] - d.blocco[0] + 1;
+      const blocco = SpreadsheetApp.openById(CFG.TEMPLATE_ID).getSheetByName(&#x27;SCHEDA CONTROLLI&#x27;).getRange(d.blocco[0], 12, n, 24).getValues();
+      sh.getRange(60, 2, n, 24).setValues(blocco);
+      Object.keys(d.esiti).forEach(function (k) { esitiRiga[Number(k)] = d.esiti[k]; });
+    }
+    sh.getRange(&#x27;F29:Y29&#x27;).setValues([esitiRiga]);
+    sh.getRange(&#x27;F30&#x27;).setValue(d.note);
+
+    const colori = { &#x27;OK&#x27;: &#x27;#95ff95&#x27;, &#x27;FUORI SERVIZIO&#x27;: &#x27;#ff9292&#x27; };
+    sh.getRange(&#x27;F32&#x27;).setValue(d.esito);
+    sh.getRange(&#x27;F32:I33&#x27;).setBackground(colori[d.esito] || &#x27;#ffff8a&#x27;);
+    sh.getRange(&#x27;Q33&#x27;).setValue(d.mesiVal);
+    sh.getRange(&#x27;S32&#x27;).setValue(d.prossima);
+    sh.getRange(&#x27;F36&#x27;).setNumberFormat(&#x27;@&#x27;).setValue(d.ispettore);
+
+    sh.getRange(&#x27;AD19&#x27;).setValue(d.nomeFile); // testo del DataMatrix = nome salvataggio
+    sh.getRange(&#x27;AD20&#x27;).setValue(d.nfc);
+
+    SpreadsheetApp.flush();
+    const tDataMatrix = Date.now(); // da qui i DataMatrix (AD19/AF19) iniziano a caricarsi
+
+    // Foto centrate nei 4 riquadri arancioni della sezione &quot;FOTO DPI&quot;
+    sh.getImages().forEach(function (img) {
+      if (img.getAnchorCell().getRow() &gt;= 81) img.remove();
+    });
+    (foto || []).slice(0, CFG.MAX_FOTO).forEach(function (f, i) {
+      const blob = Utilities.newBlob(Utilities.base64Decode(f.data), &#x27;image/jpeg&#x27;, &#x27;foto&#x27; + (i + 1) + &#x27;.jpg&#x27;);
+      const w = Number(f.w) || 1000;
+      const h = Number(f.h) || 750;
+      const k = Math.min(m.geo.maxW / w, m.geo.maxH / h);
+      const pw = Math.round(w * k), ph = Math.round(h * k);
+      const col = ancora_(m.geo.cols, m.geo.cx[i] - pw / 2);
+      const row = ancora_(m.geo.rows, m.geo.cy - ph / 2);
+      sh.insertImage(blob, col[0] + 1, m.geo.r0 + row[0], col[1], row[1]).setWidth(pw).setHeight(ph);
+    });
+
+    SpreadsheetApp.flush();
+    // tempo per caricare i DataMatrix (2,5 s in tutto: l&#x27;inserimento delle foto ne copre già una parte)
+    Utilities.sleep(Math.max(0, 2500 - (Date.now() - tDataMatrix)));
+
+    const url = &#x27;https://docs.google.com/spreadsheets/d/&#x27; + ss.getId() + &#x27;/export&#x27; +
+      &#x27;?format=pdf&amp;gid=&#x27; + sh.getSheetId() + &#x27;&amp;range=B1:AA99&amp;size=A4&amp;portrait=true&#x27; +
+      &#x27;&amp;fitw=true&amp;sheetnames=false&amp;printtitle=false&amp;gridlines=false&#x27;;
+    const resp = UrlFetchApp.fetch(url, {
+      headers: { Authorization: &#x27;Bearer &#x27; + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) {
+      throw new Error(&#x27;Errore nella creazione del PDF (&#x27; + resp.getResponseCode() + &#x27;).&#x27;);
+    }
+    return cartellaReport_().createFile(resp.getBlob().setName(d.nomeFile + &#x27;.pdf&#x27;));
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* MOTORE PDF                                                          */
+/* ------------------------------------------------------------------ */
+
+// Posizione dei 4 riquadri arancioni nell&#x27;immagine della cella D83 del REPORT (PNG 1257x589):
+// centri x, centro y e area interna utile, misurati sull&#x27;immagine.
+const FOTO_PNG = { w: 1257, h: 589, cx: [156.5, 472.5, 787.5, 1101.5], cy: 292.5, iw: 288, ih: 566 };
+const FOTO_AREA = &#x27;D83:X99&#x27;;
+const FOTO_MARGINE = 6; // px di respiro dentro il riquadro
+
+/**
+ * Apre il motore PDF (file &quot;MOTORE PDF - App Ispezioni&quot; nel Drive). Se non esiste lo crea (circa 11 secondi).
+ * Dopo la creazione va aperto una volta e cliccato &quot;Consenti accesso&quot; sulla barra gialla, altrimenti i DataMatrix escono #REF!.
+ */
+function motore_() {
+  let info = null;
+  try { info = JSON.parse(PropertiesService.getScriptProperties().getProperty(&#x27;MOTORE_PDF&#x27;) || &#x27;null&#x27;); } catch (e) {}
+  if (info &amp;&amp; info.id) {
+    try { return { ss: SpreadsheetApp.openById(info.id), geo: info.geo }; } catch (e) { /* motore cancellato: lo ricreo */ }
+  }
+  return creaMotore_(info);
+}
+
+function creaMotore_(vecchio) {
+  const file = DriveApp.getFileById(CFG.TEMPLATE_ID)
+    .makeCopy(&#x27;MOTORE PDF - App Ispezioni (non modificare)&#x27;, DriveApp.getRootFolder());
+  const ss = SpreadsheetApp.openById(file.getId());
+  const geo = geometriaFoto_(ss.getSheetByName(&#x27;REPORT&#x27;));
+  PropertiesService.getScriptProperties().setProperty(&#x27;MOTORE_PDF&#x27;, JSON.stringify({
+    id: file.getId(), creato: Utilities.formatDate(new Date(), CFG.TZ, &#x27;yyyy-MM-dd HH:mm&#x27;), geo: geo
+  }));
+  if (vecchio &amp;&amp; vecchio.id) {
+    try { DriveApp.getFileById(vecchio.id).setTrashed(true); } catch (e) {}
+  }
+  return { ss: ss, geo: geo };
+}
+
+/**
+ * Da eseguire dall&#x27;editor solo se cambi l&#x27;impaginazione del REPORT nel modello: ricrea il motore PDF.
+ * (I testi della SCHEDA CONTROLLI vengono già letti dal modello a ogni PDF.) Poi riapri il motore e clicca &quot;Consenti accesso&quot;.
+ */
+function aggiornaMotorePdf() {
+  conMutexPdf_(function () {
+    let info = null;
+    try { info = JSON.parse(PropertiesService.getScriptProperties().getProperty(&#x27;MOTORE_PDF&#x27;) || &#x27;null&#x27;); } catch (e) {}
+    const m = creaMotore_(info);
+    Logger.log(&#x27;Motore PDF ricreato: &#x27; + m.ss.getName() + &#x27; | riquadri foto: &#x27; + JSON.stringify({ cx: m.geo.cx, cy: m.geo.cy, maxW: m.geo.maxW, maxH: m.geo.maxH }));
+  });
+  CacheService.getScriptCache().remove(&#x27;agenti&#x27;);
+}
+
+/** Calcola in pixel del foglio dove stanno i 4 riquadri foto (dipende da larghezze colonne e altezze righe). */
+function geometriaFoto_(sh) {
+  const area = sh.getRange(FOTO_AREA);
+  const c0 = area.getColumn(), c1 = area.getLastColumn(), r0 = area.getRow(), r1 = area.getLastRow();
+  const somma = function (a, b) { return a + b; };
+  const cols = [], rows = [];
+  for (let c = 1; c &lt;= c1; c++) cols.push(sh.getColumnWidth(c));
+  for (let r = r0; r &lt;= r1; r++) rows.push(sh.getRowHeight(r));
+  const x0 = cols.slice(0, c0 - 1).reduce(somma, 0);
+  const W = cols.slice(c0 - 1).reduce(somma, 0), H = rows.reduce(somma, 0);
+  const k = Math.min(W / FOTO_PNG.w, H / FOTO_PNG.h); // l&#x27;immagine nella cella è adattata e centrata
+  const ox = x0 + (W - FOTO_PNG.w * k) / 2, oy = (H - FOTO_PNG.h * k) / 2;
+  return {
+    cols: cols, rows: rows, r0: r0,
+    cx: FOTO_PNG.cx.map(function (x) { return ox + x * k; }),
+    cy: oy + FOTO_PNG.cy * k,
+    maxW: FOTO_PNG.iw * k - 2 * FOTO_MARGINE,
+    maxH: FOTO_PNG.ih * k - 2 * FOTO_MARGINE
+  };
+}
+
+/** Da una posizione in pixel alla colonna/riga che la contiene (indice da 0) + offset in pixel. */
+function ancora_(misure, pos) {
+  let i = 0;
+  pos = Math.max(0, pos);
+  while (i &lt; misure.length - 1 &amp;&amp; pos &gt;= misure[i]) { pos -= misure[i]; i++; }
+  return [i, Math.round(pos)];
+}
+
+/** Un solo PDF alla volta sul motore, senza bloccare il salvataggio nel DATABASE degli altri ispettori. */
+function conMutexPdf_(fn) {
+  const cache = CacheService.getScriptCache();
+  const limite = Date.now() + 90000;
+  for (;;) {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    const libero = !cache.get(&#x27;pdf_occupato&#x27;);
+    if (libero) cache.put(&#x27;pdf_occupato&#x27;, &#x27;1&#x27;, 120);
+    lock.releaseLock();
+    if (libero) break;
+    if (Date.now() &gt; limite) throw new Error(&#x27;Generatore PDF occupato, riprova tra poco.&#x27;);
+    Utilities.sleep(800);
+  }
+  try { return fn(); } finally { cache.remove(&#x27;pdf_occupato&#x27;); }
+}
+
+/* ------------------------------------------------------------------ */
+/* UTILITÀ                                                             */
+/* ------------------------------------------------------------------ */
+
+function bloccoControlli_(categoria) {
+  const cat = String(categoria || &#x27;&#x27;).toUpperCase().replace(/\s+/g, &#x27; &#x27;).trim();
+  let best = null;
+  Object.keys(MAPPA_CONTROLLI).forEach(function (k) {
+    if (cat.indexOf(k) === 0) {
+      const next = cat.charAt(k.length);
+      if ((next === &#x27;&#x27; || !/[A-Z0-9]/.test(next)) &amp;&amp; (!best || k.length &gt; best.length)) best = k;
+    }
+  });
+  return best ? MAPPA_CONTROLLI[best] : null;
+}
+
+function estraiControlli_(sc, blk) {
+  const out = [];
+  for (let r = blk[0]; r &lt;= blk[1]; r++) {
+    const row = sc[r - 1] || [];
+    const num = String(row[0] || &#x27;&#x27;).trim();
+    const testo = String(row[2] || &#x27;&#x27;).trim();
+    if (num) out.push({ offset: r - blk[0], num: num, testo: testo });
+  }
+  return out;
+}
+
+function recordDaRiga_(r) {
+  return {
+    cliente: r[0], utilizzatore: r[1], dataIspezione: r[2], produttore: r[3],
+    modello: r[4], seriale: r[5], categoria: r[6], esito: r[7], dataProduzione: r[8],
+    durata: r[9], primoUtilizzo: r[10], prossima: r[11], nIspezioni: r[12],
+    scadenza: r[13], ispettore: r[14], agente: r[16], nomeFile: r[18], id: r[19], nfc: r[20]
+  };
+}
+
+function contaIspezioni_(sh, id) {
+  const last = sh.getLastRow();
+  if (last &lt; CFG.DB_FIRST_ROW) return 0;
+  const cerca = String(id || &#x27;&#x27;).trim();
+  if (!cerca) return 0;
+  return sh.getRange(CFG.DB_FIRST_ROW, 20, last - CFG.DB_FIRST_ROW + 1, 1)
+    .createTextFinder(cerca).matchEntireCell(true).matchCase(false).findAll().length;
+}
+
+function agentePerCliente_(cliente) {
+  // Elenco clienti -&gt; agente tenuto in cache 6 ore; se il cliente non c&#x27;è, rilegge il foglio (cliente nuovo).
+  const cache = CacheService.getScriptCache();
+  const c = norm_(cliente);
+  let mappa = null;
+  try { mappa = JSON.parse(cache.get(&#x27;agenti&#x27;) || &#x27;null&#x27;); } catch (e) {}
+  if (!mappa || !mappa[c]) {
+    mappa = {};
+    const sh = SpreadsheetApp.openById(CFG.TEMPLATE_ID).getSheetByName(&#x27;LISTA ISPETTORI&#x27;);
+    leggi_(sh, 2, 4, 4).forEach(function (v) { // D:G
+      const k = norm_(v[0]);
+      if (k &amp;&amp; !mappa[k]) mappa[k] = [v[2] || &#x27;&#x27;, v[3] || &#x27;&#x27;];
+    });
+    try { cache.put(&#x27;agenti&#x27;, JSON.stringify(mappa), 21600); } catch (e) {}
+  }
+  const a = mappa[c];
+  return a ? { agente: a[0], email: a[1] } : { agente: &#x27;&#x27;, email: &#x27;&#x27; };
+}
+
+function leggi_(sh, riga, col, nCol) {
+  const last = sh.getLastRow();
+  if (last &lt; riga) return [];
+  return sh.getRange(riga, col, last - riga + 1, nCol).getDisplayValues();
+}
+
+function unici_(arr) {
+  const v = {};
+  return arr.filter(function (x) {
+    const k = x.toUpperCase();
+    if (v[k]) return false;
+    v[k] = 1;
+    return true;
+  });
+}
+
+function norm_(v) { return String(v == null ? &#x27;&#x27; : v).trim().toLowerCase(); }
+function up_(v) { return String(v == null ? &#x27;&#x27; : v).trim().toUpperCase(); }
+
+/** &#x27;yyyy-mm-dd&#x27; -&gt; Date alle 12:00 (evita problemi di fuso orario). */
+function dataISO_(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || &#x27;&#x27;).trim());
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0) : null;
+}
+
+function oggi_() {
+  return dataISO_(Utilities.formatDate(new Date(), CFG.TZ, &#x27;yyyy-MM-dd&#x27;));
+}
+
+function fmt_(d) { return Utilities.formatDate(d, CFG.TZ, &#x27;dd/MM/yyyy&#x27;); }
+
+/** Da eseguire una volta dall&#x27;editor per autorizzare l&#x27;app e verificare l&#x27;accesso ai file. */
+function testCollegamenti() {
+  const b = getBootstrap();
+  Logger.log(&#x27;Clienti: &#x27; + b.clienti.length + &#x27; | Modelli: &#x27; + b.modelli.length +
+    &#x27; | Categorie: &#x27; + b.categorie.length + &#x27; | Ispettori: &#x27; + b.ispettori.length);
+  Logger.log(&#x27;Report da confermare: &#x27; + cartellaReport_().getName() + &#x27; | Report confermati: &#x27; + DriveApp.getFolderById(CFG.PDF_FOLDER_ID).getName());
+  Logger.log(&#x27;Righe DATABASE: &#x27; + SpreadsheetApp.openById(CFG.DB_ID).getSheetByName(CFG.DB_SHEET).getLastRow());
+  UrlFetchApp.fetch(&#x27;https://www.google.com&#x27;, { muteHttpExceptions: true });
+}
+</textarea></div>
+<div class="card"><div class="file"><h2>2 · Index.html</h2><button data-t="c2">Copia</button></div>
+<textarea id="c2" readonly spellcheck="false">&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;it&quot;&gt;
+&lt;head&gt;
+&lt;base target=&quot;_top&quot;&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1, viewport-fit=cover&quot;&gt;
+&lt;title&gt;Ispezioni DPI – Livith&lt;/title&gt;
+&lt;style&gt;
+  :root {
+    --brand: #e8771e; --brand-dark: #c4600f; --brand-soft: #fff4ea;
+    --ink: #1d232b; --muted: #6b7280; --line: #e3e5e8; --bg: #f3f4f6; --card: #fff;
+    --ok: #15803d; --ok-bg: #dcfce7; --ko: #b91c1c; --ko-bg: #fee2e2; --wait: #92400e; --wait-bg: #fef3c7;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif; }
+  body { padding-bottom: 96px; }
+  body.lock { overflow: hidden; }
+  [hidden] { display: none !important; }
+
+  header.top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; background: var(--ink); color: #fff; }
+  .brand { display: flex; flex-direction: column; line-height: 1.1; flex: 1; min-width: 0; }
+  .brand b { font-size: 20px; letter-spacing: .3px; }
+  .brand b span { color: var(--brand); }
+  .brand small { color: #c9ced6; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; }
+  header select { max-width: 46%; height: 38px; border-radius: 10px; border: 0; padding: 0 8px;
+    font-size: 14px; background: #2d3540; color: #fff; }
+  header select.err { outline: 2px solid #f87171; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 12px 12px 0; }
+  .loading { text-align: center; padding: 60px 16px; color: var(--muted); }
+  .card { background: var(--card); border-radius: var(--radius); margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05); scroll-margin-top: 70px; }
+  .card-in { padding: 16px; }
+
+  /* Intestazioni sezioni (fisarmonica) */
+  .acc-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: none;
+    border: 0; border-radius: var(--radius); text-align: left; font: inherit; color: inherit; cursor: pointer; height: auto; }
+  .acc-head .t { font-weight: 700; font-size: 17px; }
+  .acc-head .sum { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; text-align: right; }
+  .acc-head .chev { flex: none; width: 10px; height: 10px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+    transform: rotate(45deg); margin: 0 4px 4px; transition: transform .2s; }
+  .card[data-open=&quot;1&quot;] .acc-head .chev { transform: rotate(-135deg); margin-top: 6px; margin-bottom: 0; }
+  .card[data-open=&quot;1&quot;] .acc-head .sum { visibility: hidden; }
+  .acc-body { padding: 0 16px 16px; animation: apri .22s ease-out; }
+  .card[data-open=&quot;0&quot;] .acc-body { display: none; }
+  @keyframes apri { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  .n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--brand); color: #fff; font-size: 14px; font-weight: 700; flex: none; transition: background .2s; }
+  .card.done .n { background: var(--ok); }
+  .card.done .n::after { content: &quot;✓&quot;; }
+  .card.done .n span { display: none; }
+  h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 17px; }
+
+  label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin: 12px 0 5px; }
+  label .req { color: var(--brand-dark); }
+  input, select, textarea { width: 100%; font: inherit; color: var(--ink); background: #fff;
+    border: 1.5px solid var(--line); border-radius: 10px; padding: 0 12px; height: 48px; }
+  textarea { height: auto; min-height: 84px; padding: 10px 12px; resize: vertical; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); }
+  .err { border-color: var(--ko) !important; background: #fff7f7 !important; }
+  .row { display: flex; gap: 8px; }
+  .row &gt; * { flex: 1; min-width: 0; }
+  .row &gt; button { flex: none; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  @media (max-width: 420px) { .grid2 { grid-template-columns: 1fr; } }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 5px; }
+  .check { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 15px; font-weight: 400; color: var(--ink); }
+  .check input { width: 22px; height: 22px; accent-color: var(--brand); flex: none; }
+  .readout { min-height: 48px; display: flex; align-items: center; padding: 0 12px; border-radius: 10px;
+    background: var(--bg); font-weight: 600; }
+
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 10px; height: 48px; padding: 0 16px; font-weight: 600; }
+  button:disabled { opacity: .6; }
+  .btn { background: var(--ink); color: #fff; }
+  .btn-brand { background: var(--brand); color: #fff; }
+  .btn-ghost { background: var(--bg); color: var(--ink); }
+  .btn-next { width: 100%; margin-top: 16px; background: var(--ink); color: #fff; }
+  .chip { height: 34px; padding: 0 12px; border-radius: 17px; font-size: 13px; background: var(--ok-bg); color: var(--ok); }
+
+  /* Campo con tendina + ricerca */
+  .pick { width: 100%; height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #fff;
+    border: 1.5px solid var(--line); border-radius: 10px; color: var(--muted); font-weight: 400; text-align: left; }
+  .pick .v { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pick.has { color: var(--ink); font-weight: 600; }
+  .pick .ico { flex: none; width: 18px; height: 18px; border: 2px solid var(--muted); border-radius: 50%; position: relative; }
+  .pick .ico::after { content: &quot;&quot;; position: absolute; width: 7px; height: 2px; background: var(--muted); right: -6px; bottom: -3px; transform: rotate(45deg); }
+  .pick:focus { outline: none; border-color: var(--brand); }
+
+  /* Ricerca + storico */
+  .dev { margin-top: 12px; border: 1.5px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .dev.sel { border-color: var(--brand); }
+  .dev-head { display: flex; gap: 10px; align-items: flex-start; padding: 12px; background: #fff; }
+  .dev.sel .dev-head { background: var(--brand-soft); }
+  .dev-head .info { flex: 1; min-width: 0; }
+  .dev-head h3 { margin: 0; font-size: 15px; }
+  .dev-head .meta { font-size: 13px; color: var(--muted); margin-top: 2px; word-break: break-word; }
+  .count { flex: none; text-align: center; background: var(--ink); color: #fff; border-radius: 10px; padding: 6px 10px; line-height: 1.05; }
+  .count b { display: block; font-size: 22px; }
+  .count small { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .dev &gt; button { width: 100%; border-radius: 0; height: 42px; }
+  table.hist { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.hist th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+    padding: 8px 12px; background: var(--bg); font-weight: 700; }
+  table.hist td { padding: 9px 12px; border-top: 1px solid var(--line); }
+  table.hist td.anno { font-weight: 800; font-size: 15px; }
+  table.hist tr.stessoanno td { background: var(--wait-bg); }
+  .msg { padding: 10px 12px; border-radius: 10px; font-size: 14px; margin-top: 12px; }
+  .msg.info { background: #eef2ff; color: #3730a3; }
+  .msg.ok { background: var(--ok-bg); color: var(--ok); }
+  .msg.warn { background: var(--wait-bg); color: var(--wait); }
+  .msg.ko { background: var(--ko-bg); color: var(--ko); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.ko { background: var(--ko-bg); color: var(--ko); }
+  .pill.wait { background: var(--wait-bg); color: var(--wait); }
+
+  /* Controlli */
+  .ctl { border-top: 1px solid var(--line); padding: 12px 0; }
+  .ctl:first-child { border-top: 0; padding-top: 0; }
+  .ctl-head { display: flex; gap: 10px; }
+  .ctl-head .num { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+    background: var(--bg); font-weight: 700; font-size: 14px; }
+  .ctl-head b { display: block; font-size: 15px; }
+  .ctl-head p { margin: 2px 0 0; font-size: 13px; color: var(--muted); display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .ctl-head p.open { -webkit-line-clamp: unset; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .seg button { height: 46px; background: var(--bg); color: var(--ink); border: 1.5px solid transparent; transition: background .15s; }
+  .seg button.on.v-ok { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+  .seg button.on.v-ko { background: var(--ko-bg); color: var(--ko); border-color: var(--ko); }
+  .ctl.err-ctl .seg button { border-color: var(--ko); }
+  .ctl-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .ctl-top .hint { margin: 0; }
+
+  /* Foto */
+  .foto-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+  .foto { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--bg); }
+  .foto img { width: 100%; height: 100%; object-fit: cover; }
+  .foto button { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; padding: 0; border-radius: 50%;
+    background: rgba(0,0,0,.6); color: #fff; font-size: 16px; line-height: 1; }
+  .foto-add { aspect-ratio: 1; border: 2px dashed var(--line); border-radius: 10px; display: grid; place-items: center;
+    color: var(--muted); font-size: 13px; text-align: center; cursor: pointer; background: #fff; margin: 0; font-weight: 400; }
+  .foto-add span { font-size: 26px; display: block; color: var(--brand); }
+
+  /* Esito */
+  .esito { text-align: center; padding: 14px; border-radius: 12px; font-size: 22px; font-weight: 800; letter-spacing: .5px; transition: background .2s; }
+  .esito.ok { background: var(--ok-bg); color: var(--ok); }
+  .esito.ko { background: var(--ko-bg); color: var(--ko); }
+  .esito.wait { background: var(--wait-bg); color: var(--wait); }
+
+  /* Barra in basso */
+  footer.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: #fff; border-top: 1px solid var(--line);
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  footer.bar .in { max-width: 760px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+  footer.bar .stato { flex: 1; font-size: 13px; color: var(--muted); min-width: 0; }
+  footer.bar .stato b { color: var(--ink); }
+  footer.bar .prog { height: 4px; border-radius: 2px; background: var(--bg); margin-top: 6px; overflow: hidden; }
+  footer.bar .prog i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .3s; }
+  footer.bar button { height: 52px; padding: 0 20px; }
+
+  /* Tendina con ricerca (foglio a tutto schermo su telefono) */
+  .sheet { position: fixed; inset: 0; z-index: 30; background: rgba(17,24,39,.5); display: flex; align-items: flex-end; justify-content: center; }
+  .sheet-panel { background: #fff; width: 100%; max-width: 640px; height: 100dvh; display: flex; flex-direction: column; animation: sale .2s ease-out; }
+  @media (min-width: 700px) { .sheet { align-items: center; } .sheet-panel { height: 78vh; border-radius: 18px; } }
+  @keyframes sale { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+  .sheet-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px 16px; }
+  .sheet-head b { flex: 1; font-size: 17px; }
+  .sheet-head button { height: 40px; }
+  .sheet-search { padding: 4px 12px 10px; border-bottom: 1px solid var(--line); }
+  .sheet-search input { font-size: 17px; }
+  .sheet-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0 24px; }
+  .grp { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); padding: 14px 16px 6px; }
+  .opt { display: flex; align-items: center; gap: 10px; width: 100%; height: auto; min-height: 50px; padding: 10px 16px; background: none;
+    border-radius: 0; text-align: left; font-weight: 400; color: var(--ink); border-bottom: 1px solid #f1f2f4; }
+  .opt:active, .opt.kb { background: var(--brand-soft); }
+  .opt .tx { flex: 1; min-width: 0; }
+  .opt mark { background: #ffe1c4; color: inherit; border-radius: 3px; padding: 0 1px; }
+  .opt .cnt { flex: none; font-size: 12px; color: var(--muted); }
+  .opt .tick { flex: none; color: var(--brand); font-weight: 800; }
+  .opt.new { color: var(--brand-dark); font-weight: 600; }
+  .vuoto { padding: 24px 16px; color: var(--muted); text-align: center; }
+
+  /* Dialoghi */
+  .overlay { position: fixed; inset: 0; z-index: 40; background: rgba(17,24,39,.55); display: grid; place-items: center; padding: 16px; }
+  .dialog { background: #fff; border-radius: 18px; padding: 24px 20px; width: 100%; max-width: 420px; text-align: center; }
+  .dialog h3 { margin: 8px 0 6px; font-size: 20px; }
+  .dialog p { margin: 4px 0; color: var(--muted); font-size: 15px; }
+  .dialog .actions { display: grid; gap: 8px; margin-top: 18px; }
+  .dialog .actions a { display: grid; place-items: center; height: 48px; border-radius: 10px; text-decoration: none;
+    background: var(--brand); color: #fff; font-weight: 700; }
+  .dialog table.hist { margin-top: 10px; text-align: left; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .spinner { width: 46px; height: 46px; border-radius: 50%; border: 4px solid var(--bg); border-top-color: var(--brand);
+    margin: 0 auto; animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .big-ico { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; margin: 0 auto; font-size: 28px; font-weight: 800; }
+
+  /* PDF creati in secondo piano */
+  .pdf-jobs { position: fixed; left: 0; right: 0; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 11;
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 0 12px; pointer-events: none; }
+  .pdf-job { pointer-events: auto; width: 100%; max-width: 736px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-radius: 12px; font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,.12); }
+  .pdf-job span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pdf-job.wait, .pdf-dlg.wait { background: var(--wait-bg); color: var(--wait); }
+  .pdf-job.ok, .pdf-dlg.ok { background: var(--ok-bg); color: var(--ok); }
+  .pdf-job.ko, .pdf-dlg.ko { background: var(--ko-bg); color: var(--ko); }
+  .pdf-job a, .pdf-job button, .pdf-dlg a { font: inherit; font-weight: 700; color: inherit; background: none; border: 0;
+    height: auto; padding: 4px 6px; text-decoration: underline; cursor: pointer; flex: none; }
+  .pdf-dlg { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 12px; border-radius: 10px;
+    margin-top: 12px !important; font-size: 14px; }
+  .mini-spin { width: 16px; height: 16px; flex: none; border: 2px solid currentColor; border-top-color: transparent;
+    border-radius: 50%; animation: spin .9s linear infinite; }
+
+  /* Report da confermare (modificabili finché non sono confermati) */
+  .btn-fatte { flex: none; height: 38px; padding: 0 8px 0 10px; border-radius: 10px; background: #2d3540; color: #fff;
+    font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .btn-fatte b { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--brand);
+    display: grid; place-items: center; font-size: 12px; }
+  .fatte-info { margin: 0 16px 8px; font-size: 13px; color: var(--muted); }
+  .conferma-tutti { display: block; width: calc(100% - 32px); margin: 4px 16px 10px; }
+  .fatta .tx b { display: block; font-size: 15px; }
+  .fatta .tx small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .banner-mod { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+  .banner-mod span { flex: 1; min-width: 0; }
+  .banner-mod button { height: 36px; flex: none; }
+  .btn-ko { background: var(--ko-bg); color: var(--ko); }
+  .btn-ko-pieno { background: var(--ko); color: #fff; }
+
+  /* Pulsanti NFC / fotocamera */
+  .ico-btn { flex: none; width: 46px; height: 48px; padding: 0; display: grid; place-items: center; border-radius: 10px;
+    background: var(--bg); color: var(--ink); border: 1.5px solid var(--line); }
+  .ico-btn:active { background: var(--brand-soft); }
+  .ico-btn.attivo { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
+  .ico-btn.attivo .i-nfc path { animation: onda-ico 1.2s ease-in-out infinite; }
+  .ico-btn.attivo .i-nfc .w2 { animation-delay: .2s; }
+  .ico-btn.attivo .i-nfc .w3 { animation-delay: .4s; }
+  @keyframes onda-ico { 0%, 100% { opacity: .2; } 40% { opacity: 1; } }
+  .lampo { animation: lampo 1.2s ease-out; }
+  @keyframes lampo { 0% { background: var(--ok-bg); border-color: var(--ok); } 100% { background: #fff; } }
+
+  /* Animazione &quot;avvicina il telefono al tag&quot; */
+  .nfc-anim { position: relative; width: 150px; height: 150px; margin: 4px auto 8px; color: var(--brand); }
+  .nfc-anim .r { position: absolute; inset: 0; border-radius: 50%; border: 3px solid var(--brand); opacity: 0;
+    animation: onda 1.8s ease-out infinite; }
+  .nfc-anim .r2 { animation-delay: .6s; }
+  .nfc-anim .r3 { animation-delay: 1.2s; }
+  @keyframes onda { 0% { transform: scale(.3); opacity: .9; } 100% { transform: scale(1); opacity: 0; } }
+  .nfc-anim .tel { position: absolute; left: 50%; top: 50%; width: 50px; height: 80px; margin: -40px 0 0 -25px;
+    animation: avvicina 1.8s ease-in-out infinite; }
+  @keyframes avvicina { 0%, 100% { transform: translateY(6px) rotate(-10deg); } 50% { transform: translateY(-6px) rotate(-10deg); } }
+
+  /* Scanner DataMatrix */
+  .scanner { position: fixed; inset: 0; z-index: 45; background: #000; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; }
+  .scanner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .mirino { position: relative; width: min(68vw, 320px); aspect-ratio: 1; border-radius: 18px;
+    border: 3px solid rgba(255,255,255,.9); box-shadow: 0 0 0 100vmax rgba(0,0,0,.45); overflow: hidden; }
+  .mirino i { position: absolute; left: 6%; right: 6%; height: 3px; border-radius: 2px; background: var(--brand);
+    box-shadow: 0 0 12px var(--brand); animation: scansione 1.6s ease-in-out infinite alternate; }
+  @keyframes scansione { from { top: 8%; } to { top: 90%; } }
+  .scan-testo { position: relative; color: #fff; margin: 18px 20px 0; font-weight: 600; text-align: center; text-shadow: 0 1px 3px #000; }
+  .scan-azioni { position: absolute; left: 16px; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; gap: 10px; }
+  .scan-azioni button { flex: 1; }
+  .scanner.ko .mirino { border-style: dashed; border-color: rgba(255,255,255,.55); }
+  .scanner.ko .mirino i { display: none; }
+  .scanner.ko #scanFoto { background: var(--brand); color: #fff; }
+  .ico-btn.spento { opacity: .4; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;header class=&quot;top&quot;&gt;
+  &lt;div class=&quot;brand&quot;&gt;&lt;b&gt;Livit&lt;span&gt;h&lt;/span&gt;&lt;/b&gt;&lt;small&gt;Ispezioni DPI&lt;/small&gt;&lt;/div&gt;
+  &lt;button type=&quot;button&quot; class=&quot;btn-fatte&quot; id=&quot;btnFatte&quot; aria-label=&quot;Report da confermare&quot; hidden&gt;Report &lt;b id=&quot;nFatte&quot;&gt;0&lt;/b&gt;&lt;/button&gt;
+  &lt;select id=&quot;ispettore&quot; aria-label=&quot;Ispettore&quot;&gt;&lt;option value=&quot;&quot;&gt;Ispettore…&lt;/option&gt;&lt;/select&gt;
+&lt;/header&gt;
+
+&lt;main&gt;
+  &lt;div id=&quot;loading&quot; class=&quot;loading&quot;&gt;&lt;div class=&quot;spinner&quot;&gt;&lt;/div&gt;&lt;p&gt;Caricamento elenchi…&lt;/p&gt;&lt;/div&gt;
+
+  &lt;form id=&quot;form&quot; hidden autocomplete=&quot;off&quot; onsubmit=&quot;return false&quot;&gt;
+    &lt;div class=&quot;msg warn banner-mod&quot; id=&quot;bannerMod&quot; hidden&gt;&lt;span id=&quot;bannerTesto&quot;&gt;&lt;/span&gt;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;btnAnnullaMod&quot;&gt;Annulla&lt;/button&gt;&lt;/div&gt;
+    &lt;!-- 1. CERCA --&gt;
+    &lt;section class=&quot;card&quot; id=&quot;sec1&quot;&gt;
+      &lt;div class=&quot;card-in&quot;&gt;
+        &lt;h2&gt;&lt;span class=&quot;n&quot;&gt;&lt;span&gt;1&lt;/span&gt;&lt;/span&gt;Cerca il DPI&lt;/h2&gt;
+        &lt;div class=&quot;row&quot;&gt;
+          &lt;input id=&quot;q&quot; placeholder=&quot;NFC o n. di serie&quot; autocapitalize=&quot;characters&quot; enterkeyhint=&quot;search&quot;&gt;
+          &lt;button type=&quot;button&quot; class=&quot;ico-btn&quot; data-nfc=&quot;q&quot; aria-label=&quot;Leggi tag NFC&quot; title=&quot;Leggi tag NFC&quot;&gt;&lt;svg class=&quot;i-nfc&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;22&quot; height=&quot;22&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2.2&quot; stroke-linecap=&quot;round&quot; aria-hidden=&quot;true&quot;&gt;&lt;circle cx=&quot;5&quot; cy=&quot;12&quot; r=&quot;1.7&quot; fill=&quot;currentColor&quot; stroke=&quot;none&quot;/&gt;&lt;path class=&quot;w1&quot; d=&quot;M9 8.8a4.5 4.5 0 0 1 0 6.4&quot;/&gt;&lt;path class=&quot;w2&quot; d=&quot;M12.6 5.8a8.7 8.7 0 0 1 0 12.4&quot;/&gt;&lt;path class=&quot;w3&quot; d=&quot;M16.2 2.8a13 13 0 0 1 0 18.4&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;button type=&quot;button&quot; class=&quot;ico-btn&quot; data-cam=&quot;q&quot; aria-label=&quot;Scansiona DataMatrix con la fotocamera&quot; title=&quot;Scansiona DataMatrix&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; width=&quot;22&quot; height=&quot;22&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linejoin=&quot;round&quot; aria-hidden=&quot;true&quot;&gt;&lt;path d=&quot;M3.5 8.5a2 2 0 0 1 2-2h2.2l1.6-2.2h5.4l1.6 2.2h2.2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z&quot;/&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12.8&quot; r=&quot;3.6&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+          &lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;btnCerca&quot;&gt;Cerca&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div id=&quot;risultati&quot;&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;!-- 2. DATI DPI --&gt;
+    &lt;section class=&quot;card&quot; id=&quot;sec2&quot; data-open=&quot;1&quot;&gt;
+      &lt;button type=&quot;button&quot; class=&quot;acc-head&quot; data-sez=&quot;2&quot;&gt;&lt;span class=&quot;n&quot;&gt;&lt;span&gt;2&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;Dati del DPI&lt;/span&gt;&lt;span class=&quot;sum&quot; id=&quot;sum2&quot;&gt;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+      &lt;div class=&quot;acc-body&quot;&gt;
+        &lt;label&gt;Categoria del dispositivo &lt;span class=&quot;req&quot;&gt;*&lt;/span&gt;&lt;/label&gt;
+        &lt;button type=&quot;button&quot; class=&quot;pick&quot; data-pick=&quot;categoria&quot;&gt;&lt;span class=&quot;v&quot;&gt;Seleziona la categoria&lt;/span&gt;&lt;span class=&quot;ico&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;input type=&quot;hidden&quot; id=&quot;categoria&quot; data-req&gt;
+
+        &lt;label&gt;Cliente &lt;span class=&quot;req&quot;&gt;*&lt;/span&gt;&lt;/label&gt;
+        &lt;button type=&quot;button&quot; class=&quot;pick&quot; data-pick=&quot;cliente&quot;&gt;&lt;span class=&quot;v&quot;&gt;Seleziona o cerca il cliente&lt;/span&gt;&lt;span class=&quot;ico&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;input type=&quot;hidden&quot; id=&quot;cliente&quot; data-req&gt;
+        &lt;div id=&quot;agente&quot; class=&quot;hint&quot;&gt;&lt;/div&gt;
+
+        &lt;label for=&quot;utilizzatore&quot;&gt;Utilizzatore&lt;/label&gt;
+        &lt;input id=&quot;utilizzatore&quot; placeholder=&quot;-&quot;&gt;
+
+        &lt;label&gt;Produttore DPI &lt;span class=&quot;req&quot;&gt;*&lt;/span&gt;&lt;/label&gt;
+        &lt;button type=&quot;button&quot; class=&quot;pick&quot; data-pick=&quot;produttore&quot;&gt;&lt;span class=&quot;v&quot;&gt;Seleziona o cerca il produttore&lt;/span&gt;&lt;span class=&quot;ico&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;input type=&quot;hidden&quot; id=&quot;produttore&quot; data-req&gt;
+
+        &lt;label&gt;Modello &lt;span class=&quot;req&quot;&gt;*&lt;/span&gt;&lt;/label&gt;
+        &lt;button type=&quot;button&quot; class=&quot;pick&quot; data-pick=&quot;modello&quot;&gt;&lt;span class=&quot;v&quot;&gt;Seleziona o cerca il modello&lt;/span&gt;&lt;span class=&quot;ico&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;input type=&quot;hidden&quot; id=&quot;modello&quot; data-req&gt;
+
+        &lt;div class=&quot;grid2&quot;&gt;
+          &lt;div&gt;
+            &lt;label for=&quot;seriale&quot;&gt;Numero di serie &lt;span class=&quot;req&quot;&gt;*&lt;/span&gt;&lt;/label&gt;
+            &lt;input id=&quot;seriale&quot; data-req placeholder=&quot;- se non presente&quot; autocapitalize=&quot;characters&quot;&gt;
+          &lt;/div&gt;
+          &lt;div&gt;
+            &lt;label for=&quot;nfc&quot;&gt;Codice tag NFC&lt;/label&gt;
+            &lt;div class=&quot;row&quot;&gt;&lt;input id=&quot;nfc&quot; placeholder=&quot;Facoltativo&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;ico-btn&quot; data-nfc=&quot;nfc&quot; aria-label=&quot;Leggi tag NFC&quot; title=&quot;Leggi tag NFC&quot;&gt;&lt;svg class=&quot;i-nfc&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;22&quot; height=&quot;22&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2.2&quot; stroke-linecap=&quot;round&quot; aria-hidden=&quot;true&quot;&gt;&lt;circle cx=&quot;5&quot; cy=&quot;12&quot; r=&quot;1.7&quot; fill=&quot;currentColor&quot; stroke=&quot;none&quot;/&gt;&lt;path class=&quot;w1&quot; d=&quot;M9 8.8a4.5 4.5 0 0 1 0 6.4&quot;/&gt;&lt;path class=&quot;w2&quot; d=&quot;M12.6 5.8a8.7 8.7 0 0 1 0 12.4&quot;/&gt;&lt;path class=&quot;w3&quot; d=&quot;M16.2 2.8a13 13 0 0 1 0 18.4&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;button type=&quot;button&quot; class=&quot;ico-btn&quot; data-cam=&quot;nfc&quot; aria-label=&quot;Scansiona DataMatrix con la fotocamera&quot; title=&quot;Scansiona DataMatrix&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; width=&quot;22&quot; height=&quot;22&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linejoin=&quot;round&quot; aria-hidden=&quot;true&quot;&gt;&lt;path d=&quot;M3.5 8.5a2 2 0 0 1 2-2h2.2l1.6-2.2h5.4l1.6 2.2h2.2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z&quot;/&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12.8&quot; r=&quot;3.6&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;grid2&quot;&gt;
+          &lt;div&gt;
+            &lt;label for=&quot;dataProduzione&quot;&gt;Data di produzione&lt;/label&gt;
+            &lt;input id=&quot;dataProduzione&quot; type=&quot;date&quot;&gt;
+          &lt;/div&gt;
+          &lt;div&gt;
+            &lt;label for=&quot;durata&quot;&gt;Durata di vita (anni)&lt;/label&gt;
+            &lt;select id=&quot;durata&quot;&gt;&lt;/select&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;label class=&quot;check&quot;&gt;&lt;input type=&quot;checkbox&quot; id=&quot;primoDiverso&quot;&gt; Data primo utilizzo diversa dalla produzione&lt;/label&gt;
+        &lt;div id=&quot;boxPrimo&quot; hidden&gt;
+          &lt;label for=&quot;dataPrimo&quot;&gt;Data primo utilizzo&lt;/label&gt;
+          &lt;input id=&quot;dataPrimo&quot; type=&quot;date&quot;&gt;
+        &lt;/div&gt;
+        &lt;label&gt;Data di scadenza&lt;/label&gt;
+        &lt;div id=&quot;scadenza&quot; class=&quot;readout&quot;&gt;–&lt;/div&gt;
+        &lt;button type=&quot;button&quot; class=&quot;btn-next&quot; data-next=&quot;2&quot;&gt;Continua&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;!-- 3. CONTROLLI --&gt;
+    &lt;section class=&quot;card&quot; id=&quot;sec3&quot; data-open=&quot;1&quot;&gt;
+      &lt;button type=&quot;button&quot; class=&quot;acc-head&quot; data-sez=&quot;3&quot;&gt;&lt;span class=&quot;n&quot;&gt;&lt;span&gt;3&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;Controlli&lt;/span&gt;&lt;span class=&quot;sum&quot; id=&quot;sum3&quot;&gt;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+      &lt;div class=&quot;acc-body&quot;&gt;
+        &lt;div class=&quot;ctl-top&quot; id=&quot;ctlTop&quot; hidden&gt;
+          &lt;p class=&quot;hint&quot; id=&quot;ctlConta&quot;&gt;&lt;/p&gt;
+          &lt;button type=&quot;button&quot; class=&quot;chip&quot; id=&quot;btnTuttiOk&quot;&gt;✔ Tutti OK&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div id=&quot;controlli&quot;&gt;&lt;p class=&quot;hint&quot;&gt;Scegli la categoria per vedere i controlli da effettuare.&lt;/p&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;!-- 4. NOTE E FOTO --&gt;
+    &lt;section class=&quot;card&quot; id=&quot;sec4&quot; data-open=&quot;1&quot;&gt;
+      &lt;button type=&quot;button&quot; class=&quot;acc-head&quot; data-sez=&quot;4&quot;&gt;&lt;span class=&quot;n&quot;&gt;&lt;span&gt;4&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;Note e foto&lt;/span&gt;&lt;span class=&quot;sum&quot; id=&quot;sum4&quot;&gt;&lt;/span&gt;&lt;span class=&quot;chev&quot;&gt;&lt;/span&gt;&lt;/button&gt;
+      &lt;div class=&quot;acc-body&quot;&gt;
+        &lt;label for=&quot;note&quot;&gt;Note controlli&lt;/label&gt;
+        &lt;textarea id=&quot;note&quot; placeholder=&quot;Facoltative&quot;&gt;&lt;/textarea&gt;
+        &lt;label&gt;Foto DPI (max 4)&lt;/label&gt;
+        &lt;div class=&quot;foto-grid&quot; id=&quot;fotoGrid&quot;&gt;&lt;/div&gt;
+        &lt;input type=&quot;file&quot; id=&quot;fotoInput&quot; accept=&quot;image/*&quot; multiple hidden&gt;
+        &lt;button type=&quot;button&quot; class=&quot;btn-next&quot; data-next=&quot;4&quot;&gt;Continua&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;!-- 5. ESITO --&gt;
+    &lt;section class=&quot;card&quot; id=&quot;sec5&quot;&gt;
+      &lt;div class=&quot;card-in&quot;&gt;
+        &lt;h2&gt;&lt;span class=&quot;n&quot;&gt;&lt;span&gt;5&lt;/span&gt;&lt;/span&gt;Esito&lt;/h2&gt;
+        &lt;div id=&quot;esito&quot; class=&quot;esito wait&quot;&gt;IN ATTESA&lt;/div&gt;
+        &lt;div id=&quot;boxManuale&quot; hidden&gt;
+          &lt;p class=&quot;hint&quot;&gt;Per questa categoria non ci sono controlli configurati: scegli l&#x27;esito.&lt;/p&gt;
+          &lt;div class=&quot;seg&quot; id=&quot;segManuale&quot;&gt;
+            &lt;button type=&quot;button&quot; data-v=&quot;OK&quot; class=&quot;v-ok&quot;&gt;✔ OK&lt;/button&gt;
+            &lt;button type=&quot;button&quot; data-v=&quot;FUORI SERVIZIO&quot; class=&quot;v-ko&quot;&gt;✗ Fuori servizio&lt;/button&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div id=&quot;avvisi&quot;&gt;&lt;/div&gt;
+        &lt;div class=&quot;grid2&quot;&gt;
+          &lt;div&gt;
+            &lt;label for=&quot;dataIspezione&quot;&gt;Data ispezione &lt;span class=&quot;req&quot;&gt;*&lt;/span&gt;&lt;/label&gt;
+            &lt;input id=&quot;dataIspezione&quot; type=&quot;date&quot; data-req&gt;
+          &lt;/div&gt;
+          &lt;div&gt;
+            &lt;label for=&quot;mesi&quot;&gt;Da ripetere ogni&lt;/label&gt;
+            &lt;select id=&quot;mesi&quot;&gt;&lt;/select&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;label&gt;Prossima ispezione entro&lt;/label&gt;
+        &lt;div id=&quot;prossima&quot; class=&quot;readout&quot;&gt;–&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+  &lt;/form&gt;
+&lt;/main&gt;
+
+&lt;footer class=&quot;bar&quot; id=&quot;bar&quot; hidden&gt;
+  &lt;div class=&quot;in&quot;&gt;
+    &lt;div class=&quot;stato&quot;&gt;&lt;div id=&quot;stato&quot;&gt;&lt;/div&gt;&lt;div class=&quot;prog&quot;&gt;&lt;i id=&quot;prog&quot;&gt;&lt;/i&gt;&lt;/div&gt;&lt;/div&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn-brand&quot; id=&quot;btnSalva&quot;&gt;Salva e genera PDF&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/footer&gt;
+
+&lt;div class=&quot;pdf-jobs&quot; id=&quot;pdfJobs&quot;&gt;&lt;/div&gt;
+
+&lt;div class=&quot;sheet&quot; id=&quot;sheet&quot; hidden&gt;
+  &lt;div class=&quot;sheet-panel&quot; role=&quot;dialog&quot; aria-modal=&quot;true&quot; aria-labelledby=&quot;sheetTitle&quot;&gt;
+    &lt;div class=&quot;sheet-head&quot;&gt;&lt;b id=&quot;sheetTitle&quot;&gt;&lt;/b&gt;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;sheetClose&quot;&gt;Chiudi&lt;/button&gt;&lt;/div&gt;
+    &lt;div class=&quot;sheet-search&quot;&gt;&lt;input id=&quot;sheetInput&quot; type=&quot;search&quot; placeholder=&quot;Scrivi per cercare…&quot; autocomplete=&quot;off&quot; enterkeyhint=&quot;done&quot;&gt;&lt;/div&gt;
+    &lt;div class=&quot;sheet-list&quot; id=&quot;sheetList&quot;&gt;&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;sheet&quot; id=&quot;sheetFatte&quot; hidden&gt;
+  &lt;div class=&quot;sheet-panel&quot; role=&quot;dialog&quot; aria-modal=&quot;true&quot; aria-labelledby=&quot;fatteTitolo&quot;&gt;
+    &lt;div class=&quot;sheet-head&quot;&gt;&lt;b id=&quot;fatteTitolo&quot;&gt;Report da confermare&lt;/b&gt;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;fatteChiudi&quot;&gt;Chiudi&lt;/button&gt;&lt;/div&gt;
+    &lt;p class=&quot;fatte-info&quot;&gt;Finché non li confermi puoi modificarli o cancellarli. Confermati, vanno nella cartella REPORT TEMPORANEI di magazzino e non si possono più toccare.&lt;/p&gt;
+    &lt;div class=&quot;sheet-list&quot; id=&quot;fatteLista&quot;&gt;&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;scanner&quot; id=&quot;scanner&quot; hidden&gt;
+  &lt;video id=&quot;camVideo&quot; autoplay playsinline webkit-playsinline muted&gt;&lt;/video&gt;
+  &lt;div class=&quot;mirino&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;/div&gt;
+  &lt;div class=&quot;scan-testo&quot; id=&quot;scanTesto&quot;&gt;Inquadra il codice DataMatrix nel riquadro&lt;/div&gt;
+  &lt;div class=&quot;scan-azioni&quot;&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn-brand&quot; id=&quot;scanFoto&quot;&gt;Scatta&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;scanChiudi&quot;&gt;Chiudi&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;input type=&quot;file&quot; id=&quot;camFoto&quot; accept=&quot;image/*&quot; capture=&quot;environment&quot; hidden&gt;
+
+&lt;div class=&quot;overlay&quot; id=&quot;overlay&quot; hidden&gt;&lt;div class=&quot;dialog&quot; id=&quot;dialog&quot;&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;script&gt;
+(function () {
+  &#x27;use strict&#x27;;
+  var $ = function (id) { return document.getElementById(id); };
+  var each = function (sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); };
+  var S = { boot: null, controlli: [], risposte: {}, foto: [], durataToccata: false, esitoManuale: &#x27;&#x27;,
+            gruppi: [], gruppoSel: -1, picker: null, items: [] };
+
+  var CAMPI = {
+    categoria: { titolo: &#x27;Categoria del dispositivo&#x27;, vuoto: &#x27;Seleziona la categoria&#x27;, nuovo: false },
+    cliente: { titolo: &#x27;Cliente&#x27;, vuoto: &#x27;Seleziona o cerca il cliente&#x27;, nuovo: true },
+    produttore: { titolo: &#x27;Produttore DPI&#x27;, vuoto: &#x27;Seleziona o cerca il produttore&#x27;, nuovo: true },
+    modello: { titolo: &#x27;Modello&#x27;, vuoto: &#x27;Seleziona o cerca il modello&#x27;, nuovo: true }
+  };
+
+  /* ---------- utilità ---------- */
+  function run(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (res, rej) {
+      var r = google.script.run.withSuccessHandler(res).withFailureHandler(rej);
+      r[fn].apply(r, args);
+    });
+  }
+  function msgErr(e) { return (e &amp;&amp; e.message) ? e.message : String(e); }
+  function esc(s) {
+    return String(s == null ? &#x27;&#x27; : s).replace(/[&amp;&lt;&gt;&quot;&#x27;]/g, function (c) {
+      return { &#x27;&amp;&#x27;: &#x27;&amp;amp;&#x27;, &#x27;&lt;&#x27;: &#x27;&amp;lt;&#x27;, &#x27;&gt;&#x27;: &#x27;&amp;gt;&#x27;, &#x27;&quot;&#x27;: &#x27;&amp;quot;&#x27;, &quot;&#x27;&quot;: &#x27;&amp;#39;&#x27; }[c];
+    });
+  }
+  function piega(s) { return String(s == null ? &#x27;&#x27; : s).normalize(&#x27;NFD&#x27;).replace(/[̀-ͯ]/g, &#x27;&#x27;).toUpperCase(); }
+  function norm(s) { return piega(s).replace(/\s+/g, &#x27; &#x27;).trim(); }
+  function pad(n) { return (n &lt; 10 ? &#x27;0&#x27; : &#x27;&#x27;) + n; }
+  function isoOggi() { var d = new Date(); return d.getFullYear() + &#x27;-&#x27; + pad(d.getMonth() + 1) + &#x27;-&#x27; + pad(d.getDate()); }
+  function isoToDate(s) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || &#x27;&#x27;); return m ? new Date(+m[1], +m[2] - 1, +m[3], 12) : null; }
+  function itToIso(s) { var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(s || &#x27;&#x27;).trim()); return m ? m[3] + &#x27;-&#x27; + pad(+m[2]) + &#x27;-&#x27; + pad(+m[1]) : &#x27;&#x27;; }
+  function fmtIt(d) { return pad(d.getDate()) + &#x27;/&#x27; + pad(d.getMonth() + 1) + &#x27;/&#x27; + d.getFullYear(); }
+  function annoDi(s) { var m = /\b(\d{4})\b/.exec(String(s || &#x27;&#x27;)); return m ? m[1] : &#x27;&#x27;; }
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignora */ } }
+  function sembraNfc(s) { return /^[0-9a-f]{8}([0-9a-f]{6})?$/i.test(s) &amp;&amp; /[a-f]/i.test(s); }
+
+  /* ---------- avvio ---------- */
+  function init() {
+    var dur = $(&#x27;durata&#x27;);
+    for (var i = 1; i &lt;= 10; i++) dur.add(new Option(String(i), String(i)));
+    dur.add(new Option(&#x27;∞&#x27;, &#x27;∞&#x27;));
+    dur.value = &#x27;10&#x27;;
+    var mesi = $(&#x27;mesi&#x27;);
+    for (var m = 1; m &lt;= 12; m++) mesi.add(new Option(m + (m === 1 ? &#x27; mese&#x27; : &#x27; mesi&#x27;), String(m)));
+    mesi.value = &#x27;12&#x27;;
+    $(&#x27;dataIspezione&#x27;).value = isoOggi();
+    renderFoto();
+    collegaEventi();
+
+    run(&#x27;getBootstrap&#x27;).then(function (b) {
+      S.boot = b;
+      S.boot.storico = b.storico || [];
+      var sel = $(&#x27;ispettore&#x27;);
+      b.ispettori.forEach(function (x) { sel.add(new Option(x.codice + &#x27; – &#x27; + x.nome, x.codice)); });
+      var salvato = lsGet(&#x27;ispettore&#x27;);
+      if (salvato &amp;&amp; b.ispettori.some(function (x) { return x.codice === salvato; })) sel.value = salvato;
+      $(&#x27;loading&#x27;).hidden = true;
+      $(&#x27;form&#x27;).hidden = false;
+      $(&#x27;bar&#x27;).hidden = false;
+      aggiorna();
+      leggiParametriUrl();
+      aggiornaFatte();
+    }).catch(function (e) {
+      $(&#x27;loading&#x27;).innerHTML = &#x27;&lt;div class=&quot;msg ko&quot;&gt;Impossibile caricare gli elenchi: &#x27; + esc(msgErr(e)) + &#x27;&lt;/div&gt;&#x27;;
+    });
+  }
+
+  function leggiParametriUrl() {
+    if (!(window.google &amp;&amp; google.script &amp;&amp; google.script.url)) return;
+    google.script.url.getLocation(function (loc) {
+      var par = (loc &amp;&amp; loc.parameter) || {};
+      var n = par.nfc || par.q;
+      if (!n) return;
+      if (par.campo === &#x27;nfc&#x27; || par.fonte === &#x27;cam&#x27;) riceviCodice(par.campo === &#x27;nfc&#x27; ? &#x27;nfc&#x27; : &#x27;q&#x27;, n, par.fonte === &#x27;cam&#x27; ? &#x27;cam&#x27; : &#x27;nfc&#x27;);
+      else { $(&#x27;q&#x27;).value = n; cerca(); }
+    });
+  }
+
+  function collegaEventi() {
+    $(&#x27;ispettore&#x27;).addEventListener(&#x27;change&#x27;, function () { lsSet(&#x27;ispettore&#x27;, this.value); this.classList.remove(&#x27;err&#x27;); aggiorna(); aggiornaFatte(); });
+    $(&#x27;btnFatte&#x27;).addEventListener(&#x27;click&#x27;, apriFatte);
+    $(&#x27;fatteChiudi&#x27;).addEventListener(&#x27;click&#x27;, chiudiFatte);
+    $(&#x27;sheetFatte&#x27;).addEventListener(&#x27;click&#x27;, function (e) { if (e.target === this) chiudiFatte(); });
+    $(&#x27;fatteLista&#x27;).addEventListener(&#x27;click&#x27;, function (e) {
+      var b = e.target.closest(&#x27;[data-f]&#x27;); if (b) sceltaFatta(+b.getAttribute(&#x27;data-f&#x27;));
+    });
+    $(&#x27;btnAnnullaMod&#x27;).addEventListener(&#x27;click&#x27;, function () { nuova(&#x27;tutto&#x27;); });
+    $(&#x27;btnCerca&#x27;).addEventListener(&#x27;click&#x27;, cerca);
+    $(&#x27;q&#x27;).addEventListener(&#x27;keydown&#x27;, function (e) { if (e.key === &#x27;Enter&#x27;) { e.preventDefault(); cerca(); } });
+
+    each(&#x27;.pick&#x27;, function (b) { b.addEventListener(&#x27;click&#x27;, function () { apriPicker(b.getAttribute(&#x27;data-pick&#x27;)); }); });
+    $(&#x27;sheetClose&#x27;).addEventListener(&#x27;click&#x27;, chiudiPicker);
+    $(&#x27;sheet&#x27;).addEventListener(&#x27;click&#x27;, function (e) { if (e.target === this) chiudiPicker(); });
+    $(&#x27;sheetInput&#x27;).addEventListener(&#x27;input&#x27;, renderPicker);
+    $(&#x27;sheetInput&#x27;).addEventListener(&#x27;keydown&#x27;, function (e) {
+      if (e.key === &#x27;Escape&#x27;) chiudiPicker();
+      if (e.key === &#x27;Enter&#x27;) { e.preventDefault(); if (S.items.length) scegli(S.items[0]); }
+    });
+    $(&#x27;sheetList&#x27;).addEventListener(&#x27;click&#x27;, function (e) {
+      var b = e.target.closest(&#x27;.opt&#x27;); if (!b) return;
+      scegli(S.items[+b.getAttribute(&#x27;data-i&#x27;)]);
+    });
+
+    [&#x27;utilizzatore&#x27;, &#x27;seriale&#x27;, &#x27;nfc&#x27;, &#x27;dataProduzione&#x27;, &#x27;dataPrimo&#x27;, &#x27;dataIspezione&#x27;, &#x27;note&#x27;].forEach(function (id) {
+      $(id).addEventListener(&#x27;input&#x27;, function () { this.classList.remove(&#x27;err&#x27;); aggiorna(); });
+    });
+    $(&#x27;dataIspezione&#x27;).addEventListener(&#x27;change&#x27;, function () { renderRisultati(); aggiorna(); });
+    $(&#x27;durata&#x27;).addEventListener(&#x27;change&#x27;, function () { S.durataToccata = true; aggiorna(); });
+    $(&#x27;mesi&#x27;).addEventListener(&#x27;change&#x27;, aggiorna);
+    $(&#x27;primoDiverso&#x27;).addEventListener(&#x27;change&#x27;, function () { $(&#x27;boxPrimo&#x27;).hidden = !this.checked; aggiorna(); });
+    $(&#x27;btnTuttiOk&#x27;).addEventListener(&#x27;click&#x27;, function () {
+      S.controlli.forEach(function (c) { S.risposte[c.offset] = &#x27;✔&#x27;; });
+      renderControlli(); aggiorna(); dopoRisposta();
+    });
+    $(&#x27;segManuale&#x27;).addEventListener(&#x27;click&#x27;, function (e) {
+      var b = e.target.closest(&#x27;button&#x27;); if (!b) return;
+      S.esitoManuale = b.getAttribute(&#x27;data-v&#x27;); aggiorna();
+    });
+    $(&#x27;fotoInput&#x27;).addEventListener(&#x27;change&#x27;, aggiungiFoto);
+    $(&#x27;btnSalva&#x27;).addEventListener(&#x27;click&#x27;, function () { salva(false); });
+
+    each(&#x27;.acc-head&#x27;, function (h) {
+      h.addEventListener(&#x27;click&#x27;, function () {
+        var n = h.getAttribute(&#x27;data-sez&#x27;);
+        if ($(&#x27;sec&#x27; + n).getAttribute(&#x27;data-open&#x27;) === &#x27;1&#x27;) chiudiSez(n); else apriSez(n, false);
+      });
+    });
+    each(&#x27;.btn-next&#x27;, function (b) {
+      b.addEventListener(&#x27;click&#x27;, function () {
+        var n = +b.getAttribute(&#x27;data-next&#x27;);
+        if (n === 2 &amp;&amp; !sez2Completa()) { evidenziaErrori(2); return; }
+        chiudiSez(n);
+        var dopo = n === 2 ? 3 : 5;
+        apriSez(dopo, true);
+      });
+    });
+
+    each(&#x27;[data-nfc]&#x27;, function (b) {
+      if (!nfcSupportato()) b.classList.add(&#x27;spento&#x27;);
+      b.addEventListener(&#x27;click&#x27;, function () { avviaNfc(b.getAttribute(&#x27;data-nfc&#x27;)); });
+    });
+    each(&#x27;[data-cam]&#x27;, function (b) { b.addEventListener(&#x27;click&#x27;, function () { avviaCamera(b.getAttribute(&#x27;data-cam&#x27;)); }); });
+    $(&#x27;scanChiudi&#x27;).addEventListener(&#x27;click&#x27;, chiudiScanner);
+    $(&#x27;scanFoto&#x27;).addEventListener(&#x27;click&#x27;, function () {
+      var c = S.camCampo;
+      if (!$(&#x27;scanner&#x27;).classList.contains(&#x27;ko&#x27;)) { scattaDaVideo(); return; }
+      chiudiScanner();
+      if (nfcPagina()) apriPaginaEsterna(&#x27;cam&#x27;, c);
+      else { $(&#x27;camFoto&#x27;).click(); S.camCampo = c; }
+    });
+    $(&#x27;camFoto&#x27;).addEventListener(&#x27;change&#x27;, leggiFotoCodice);
+    $(&#x27;q&#x27;).addEventListener(&#x27;input&#x27;, function () { S.scan = null; });
+    window.addEventListener(&#x27;message&#x27;, function (e) {
+      var d = e.data;
+      if (!d || typeof d !== &#x27;object&#x27; || String(d.tipo || &#x27;&#x27;).indexOf(&#x27;livith-nfc&#x27;) !== 0) return;
+      if (nfcPagina() &amp;&amp; e.origin !== new URL(nfcPagina(), location.href).origin) return;
+      if (d.tipo === &#x27;livith-nfc&#x27;) riceviCodice(d.campo || S.nfcCampo || S.camCampo || &#x27;q&#x27;, d.valore, d.fonte === &#x27;cam&#x27; ? &#x27;cam&#x27; : &#x27;nfc&#x27;);
+      else { fermaNfc(); segnaAttivo(&#x27;cam&#x27;, &#x27;&#x27;, false); chiudiDialogo(); }
+    });
+  }
+
+  /* ---------- sezioni a fisarmonica ---------- */
+  function apriSez(n, scorri) {
+    var s = $(&#x27;sec&#x27; + n);
+    if (s.hasAttribute(&#x27;data-open&#x27;)) s.setAttribute(&#x27;data-open&#x27;, &#x27;1&#x27;);
+    if (scorri) setTimeout(function () { s.scrollIntoView({ behavior: &#x27;smooth&#x27;, block: &#x27;start&#x27; }); }, 60);
+  }
+  function chiudiSez(n) { var s = $(&#x27;sec&#x27; + n); if (s.hasAttribute(&#x27;data-open&#x27;)) s.setAttribute(&#x27;data-open&#x27;, &#x27;0&#x27;); aggiorna(); }
+
+  /* ---------- NFC ----------
+     Chrome permette di leggere i tag NFC solo nella pagina principale, mentre l&#x27;app di Google gira dentro
+     una cornice: per questo il lettore è una piccola pagina a parte (lettore-nfc.html) che legge il tag
+     e rimanda il codice all&#x27;app. Il suo indirizzo si imposta in Codice.gs (CFG.NFC_PAGINA). */
+  function nfcPagina() { return (S.boot &amp;&amp; S.boot.nfcPagina) || &#x27;&#x27;; }
+
+  var ANIM_NFC = &#x27;&lt;div class=&quot;nfc-anim&quot;&gt;&lt;span class=&quot;r&quot;&gt;&lt;/span&gt;&lt;span class=&quot;r r2&quot;&gt;&lt;/span&gt;&lt;span class=&quot;r r3&quot;&gt;&lt;/span&gt;&#x27; +
+    &#x27;&lt;svg class=&quot;tel&quot; viewBox=&quot;0 0 50 80&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;3&quot; width=&quot;44&quot; height=&quot;74&quot; rx=&quot;9&quot; fill=&quot;#fff&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;4&quot;/&gt;&#x27; +
+    &#x27;&lt;path d=&quot;M18 30a8 8 0 0 1 0 14M24 25a15 15 0 0 1 0 24M30 20a22 22 0 0 1 0 34&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;3.5&quot; stroke-linecap=&quot;round&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;&#x27;;
+
+  function segnaAttivo(tipo, campo, on) {
+    each(&#x27;[data-&#x27; + tipo + &#x27;]&#x27;, function (b) { b.classList.toggle(&#x27;attivo&#x27;, on &amp;&amp; b.getAttribute(&#x27;data-&#x27; + tipo) === campo); });
+  }
+
+  function nfcSupportato() { return &#x27;NDEFReader&#x27; in window; }
+  function eIphone() { return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === &#x27;MacIntel&#x27; &amp;&amp; navigator.maxTouchPoints &gt; 1); }
+
+  function avviaNfc(campo) {
+    fermaNfc();
+    if (!nfcSupportato()) {
+      dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--wait-bg);color:var(--wait)&quot;&gt;!&lt;/div&gt;&lt;h3&gt;NFC non disponibile qui&lt;/h3&gt;&#x27; +
+        &#x27;&lt;p&gt;&#x27; + (eIphone() ? &#x27;Su iPhone Apple non permette ai siti di leggere i tag NFC, con nessun browser.&#x27; :
+          &#x27;La lettura NFC dal browser funziona solo con Chrome sui telefoni Android.&#x27;) +
+        &#x27; Usa la fotocamera per il DataMatrix oppure scrivi il codice.&lt;/p&gt;&#x27; +
+        &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;btnChiudi&quot;&gt;Chiudi&lt;/button&gt;&lt;/div&gt;&#x27;);
+      $(&#x27;btnChiudi&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+      return;
+    }
+    var testo = campo === &#x27;nfc&#x27; ? &#x27;Il codice letto andrà nel campo «Codice tag NFC».&#x27; : &#x27;Poi cerco il DPI nel database.&#x27;;
+    if (&#x27;NDEFReader&#x27; in window &amp;&amp; window.top === window) {
+      // app aperta come pagina principale: lettura diretta
+      try {
+        S.nfcCtrl = new AbortController();
+        var r = new NDEFReader();
+        r.onreading = function (ev) { riceviCodice(campo, String(ev.serialNumber || &#x27;&#x27;).replace(/:/g, &#x27;&#x27;), &#x27;nfc&#x27;); };
+        r.scan({ signal: S.nfcCtrl.signal }).catch(function (e) { fermaNfc(); erroreDialogo(&#x27;Lettura NFC non disponibile&#x27;, e); });
+      } catch (e) { erroreDialogo(&#x27;Lettura NFC non disponibile&#x27;, e); return; }
+    } else if (nfcPagina()) {
+      apriPaginaEsterna(&#x27;nfc&#x27;, campo);
+      return;
+    } else {
+      dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--wait-bg);color:var(--wait)&quot;&gt;!&lt;/div&gt;&lt;h3&gt;Lettore NFC da attivare&lt;/h3&gt;&#x27; +
+        &#x27;&lt;p&gt;Dentro l’app di Google, Chrome non permette di leggere i tag NFC. Serve la paginetta &lt;b&gt;lettore-nfc.html&lt;/b&gt; pubblicata su un sito &#x27; +
+        &#x27;(per esempio quello aziendale): chiedi a chi gestisce l’app. Intanto puoi scrivere il codice o usare la fotocamera.&lt;/p&gt;&#x27; +
+        &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;btnChiudi&quot;&gt;Chiudi&lt;/button&gt;&lt;/div&gt;&#x27;);
+      $(&#x27;btnChiudi&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+      return;
+    }
+    S.nfcCampo = campo;
+    segnaAttivo(&#x27;nfc&#x27;, campo, true);
+    dialogo(ANIM_NFC + &#x27;&lt;h3&gt;Avvicina il telefono al tag NFC&lt;/h3&gt;&lt;p&gt;&#x27; + esc(testo) + &#x27;&lt;/p&gt;&#x27; +
+      &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;nfcAnnulla&quot;&gt;Annulla&lt;/button&gt;&lt;/div&gt;&#x27;);
+    $(&#x27;nfcAnnulla&#x27;).addEventListener(&#x27;click&#x27;, function () { fermaNfc(); chiudiDialogo(); });
+  }
+
+  /** Apre la pagina esterna (lettore-nfc.html) per l&#x27;NFC o per la fotocamera: lì il browser le permette. */
+  function apriPaginaEsterna(modo, campo) {
+    var url = nfcPagina() + (nfcPagina().indexOf(&#x27;?&#x27;) &lt; 0 ? &#x27;?&#x27; : &#x27;&amp;&#x27;) + &#x27;modo=&#x27; + modo + &#x27;&amp;campo=&#x27; + campo +
+      (S.boot &amp;&amp; S.boot.urlApp ? &#x27;&amp;ritorno=&#x27; + encodeURIComponent(S.boot.urlApp) : &#x27;&#x27;);
+    window.open(url, &#x27;_blank&#x27;);
+    var dove = campo === &#x27;nfc&#x27; ? &#x27;Il codice letto andrà nel campo «Codice tag NFC».&#x27; : &#x27;Poi cerco il DPI nel database.&#x27;;
+    if (modo === &#x27;cam&#x27;) {
+      S.camCampo = campo;
+      segnaAttivo(&#x27;cam&#x27;, campo, true);
+      dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--brand-soft);color:var(--brand)&quot;&gt;&#x27; +
+        &#x27;&lt;svg viewBox=&quot;0 0 24 24&quot; width=&quot;30&quot; height=&quot;30&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;path d=&quot;M3.5 8.5a2 2 0 0 1 2-2h2.2l1.6-2.2h5.4l1.6 2.2h2.2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z&quot;/&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12.8&quot; r=&quot;3.6&quot;/&gt;&lt;/svg&gt;&lt;/div&gt;&#x27; +
+        &#x27;&lt;h3&gt;Inquadra il codice&lt;/h3&gt;&lt;p&gt;Si è aperta la fotocamera: appena legge il DataMatrix torni qui da solo. &#x27; + esc(dove) + &#x27;&lt;/p&gt;&#x27; +
+        &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;nfcAnnulla&quot;&gt;Annulla&lt;/button&gt;&lt;/div&gt;&#x27;);
+    } else {
+      S.nfcCampo = campo;
+      segnaAttivo(&#x27;nfc&#x27;, campo, true);
+      dialogo(ANIM_NFC + &#x27;&lt;h3&gt;Avvicina il telefono al tag NFC&lt;/h3&gt;&lt;p&gt;Si è aperta la pagina del lettore: avvicina il telefono al tag e poi torni qui da solo. &#x27; + esc(dove) + &#x27;&lt;/p&gt;&#x27; +
+        &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;nfcAnnulla&quot;&gt;Annulla&lt;/button&gt;&lt;/div&gt;&#x27;);
+    }
+    $(&#x27;nfcAnnulla&#x27;).addEventListener(&#x27;click&#x27;, function () { fermaNfc(); segnaAttivo(&#x27;cam&#x27;, &#x27;&#x27;, false); chiudiDialogo(); });
+  }
+
+  function fermaNfc() {
+    if (S.nfcCtrl) { try { S.nfcCtrl.abort(); } catch (e) { /* ignora */ } S.nfcCtrl = null; }
+    S.nfcCampo = &#x27;&#x27;;
+    segnaAttivo(&#x27;nfc&#x27;, &#x27;&#x27;, false);
+  }
+
+  /* ---------- DataMatrix con la fotocamera ---------- */
+  var ZXING_URL = &#x27;https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js&#x27;;
+
+  function caricaZxing() {
+    if (window.ZXing) return Promise.resolve();
+    return new Promise(function (res, rej) {
+      var sc = document.createElement(&#x27;script&#x27;);
+      sc.src = ZXING_URL;
+      sc.onload = function () { res(); };
+      sc.onerror = function () { rej(new Error(&#x27;Non riesco a caricare il lettore di codici: controlla la connessione.&#x27;)); };
+      document.head.appendChild(sc);
+    });
+  }
+
+  /** Restituisce una funzione canvas -&gt; Promise(testo letto | &#x27;&#x27;) : BarcodeDetector di Chrome, altrimenti ZXing. */
+  function preparaDecoder() {
+    if (S.decoder) return Promise.resolve(S.decoder);
+    var nativo = (&#x27;BarcodeDetector&#x27; in window) ? BarcodeDetector.getSupportedFormats().then(function (f) {
+      if (f.indexOf(&#x27;data_matrix&#x27;) &lt; 0) return null;
+      return new BarcodeDetector({ formats: f.filter(function (x) { return [&#x27;data_matrix&#x27;, &#x27;qr_code&#x27;, &#x27;aztec&#x27;, &#x27;pdf417&#x27;, &#x27;code_128&#x27;, &#x27;code_39&#x27;].indexOf(x) &gt;= 0; }) });
+    }).catch(function () { return null; }) : Promise.resolve(null);
+    return nativo.then(function (det) {
+      if (det) {
+        S.decoder = function (c) { return det.detect(c).then(function (r) { return r.length ? r[0].rawValue : &#x27;&#x27;; }).catch(function () { return &#x27;&#x27;; }); };
+        return S.decoder;
+      }
+      return caricaZxing().then(function () {
+        var hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.QR_CODE]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        var reader = new ZXing.MultiFormatReader();
+        reader.setHints(hints);
+        S.decoder = function (c) {
+          try {
+            var bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(c)));
+            return Promise.resolve(reader.decode(bmp).getText());
+          } catch (e) { return Promise.resolve(&#x27;&#x27;); }
+        };
+        return S.decoder;
+      });
+    });
+  }
+
+  function avviaCamera(campo) {
+    fermaNfc();
+    S.camCampo = campo;
+    if (nfcPagina() &amp;&amp; (eIphone() || lsGet(&#x27;camEsterna&#x27;) === &#x27;1&#x27;)) { apriPaginaEsterna(&#x27;cam&#x27;, campo); return; }
+    if (!(navigator.mediaDevices &amp;&amp; navigator.mediaDevices.getUserMedia)) { $(&#x27;camFoto&#x27;).click(); return; }
+    $(&#x27;scanner&#x27;).hidden = false;
+    $(&#x27;scanner&#x27;).classList.remove(&#x27;ko&#x27;);
+    $(&#x27;scanTesto&#x27;).textContent = &#x27;Avvio la fotocamera…&#x27;;
+    document.body.classList.add(&#x27;lock&#x27;);
+    segnaAttivo(&#x27;cam&#x27;, campo, true);
+    var giro = ++S.camGiro;
+    clearTimeout(S.camTimer);
+    // se dopo 4 secondi il video è ancora nero (succede su alcuni iPhone) si passa alla foto
+    S.camTimer = setTimeout(function () {
+      if (giro === S.camGiro &amp;&amp; !$(&#x27;scanner&#x27;).hidden &amp;&amp; !$(&#x27;camVideo&#x27;).videoWidth) camNonVa(&#x27;&#x27;);
+    }, 4000);
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: &#x27;environment&#x27; }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+      .then(function (st) {
+        if (giro !== S.camGiro || $(&#x27;scanner&#x27;).hidden) { st.getTracks().forEach(function (t) { t.stop(); }); return; }
+        S.camStream = st;
+        var v = $(&#x27;camVideo&#x27;);
+        v.muted = true;
+        v.autoplay = true;
+        v.setAttribute(&#x27;playsinline&#x27;, &#x27;&#x27;);
+        v.setAttribute(&#x27;webkit-playsinline&#x27;, &#x27;&#x27;);
+        v.srcObject = st;
+        var pr = v.play();
+        if (pr &amp;&amp; pr.catch) pr.catch(function () { /* se non parte ci pensa il controllo dei 4 secondi */ });
+        $(&#x27;scanTesto&#x27;).textContent = &#x27;Inquadra il codice DataMatrix nel riquadro&#x27;;
+        return preparaDecoder().then(function (dec) { cicloScanner(dec, giro); });
+      })
+      .catch(function (e) {
+        if (giro !== S.camGiro || $(&#x27;scanner&#x27;).hidden) return;
+        camNonVa(e &amp;&amp; /lettore di codici/.test(e.message || &#x27;&#x27;) ? e.message : &#x27;&#x27;);
+      });
+  }
+
+  /** Fotocamera in diretta non disponibile: si ferma e si propone la foto. */
+  function camNonVa(msg) {
+    S.camGiro++;
+    clearTimeout(S.camTimer);
+    if (S.camStream) { S.camStream.getTracks().forEach(function (t) { t.stop(); }); S.camStream = null; }
+    $(&#x27;camVideo&#x27;).srcObject = null;
+    $(&#x27;scanner&#x27;).classList.add(&#x27;ko&#x27;);
+    if (nfcPagina()) lsSet(&#x27;camEsterna&#x27;, &#x27;1&#x27;); // le prossime volte si apre subito la fotocamera esterna
+    $(&#x27;scanFoto&#x27;).textContent = nfcPagina() ? &#x27;Apri la fotocamera&#x27; : &#x27;Scatta una foto&#x27;;
+    $(&#x27;scanTesto&#x27;).textContent = msg || (nfcPagina() ? &#x27;Dentro l’app la fotocamera in diretta non si apre su questo telefono. Tocca «Apri la fotocamera».&#x27; :
+      &#x27;Su questo telefono la fotocamera in diretta non si apre dentro l’app. Tocca «Scatta una foto» e fotografa il codice da vicino.&#x27;);
+  }
+
+  S.camGiro = 0;
+  function cicloScanner(dec, giro) {
+    if (giro !== S.camGiro || $(&#x27;scanner&#x27;).hidden) return;
+    var v = $(&#x27;camVideo&#x27;), w = v.videoWidth, h = v.videoHeight;
+    if (!w || !h) { setTimeout(function () { cicloScanner(dec, giro); }, 200); return; }
+    var lato = Math.round(Math.min(w, h) * 0.75), sc = Math.min(1, 900 / lato);
+    var c = S.camCanvas || (S.camCanvas = document.createElement(&#x27;canvas&#x27;));
+    c.width = c.height = Math.round(lato * sc);
+    c.getContext(&#x27;2d&#x27;).drawImage(v, (w - lato) / 2, (h - lato) / 2, lato, lato, 0, 0, c.width, c.height);
+    dec(c).then(function (t) {
+      if (giro !== S.camGiro || $(&#x27;scanner&#x27;).hidden) return;
+      if (t) { if (navigator.vibrate) navigator.vibrate(80); var campo = S.camCampo; chiudiScanner(); riceviCodice(campo, t, &#x27;cam&#x27;); }
+      else setTimeout(function () { cicloScanner(dec, giro); }, 150);
+    });
+  }
+
+  /** «Scatta» con la fotocamera in diretta: legge subito il fotogramma attuale a piena risoluzione. */
+  function scattaDaVideo() {
+    var v = $(&#x27;camVideo&#x27;), w = v.videoWidth, h = v.videoHeight;
+    if (!w || !h || !S.decoder) return;
+    var tagli = [[1, 1600], [0.75, 1200], [1, 2400]], i = 0, campo = S.camCampo;
+    $(&#x27;scanTesto&#x27;).textContent = &#x27;Leggo…&#x27;;
+    (function prova() {
+      if ($(&#x27;scanner&#x27;).hidden) return;
+      if (i &gt;= tagli.length) { $(&#x27;scanTesto&#x27;).textContent = &#x27;Codice non trovato: avvicinati, metti a fuoco e riprova.&#x27;; return; }
+      var q = tagli[i][0], max = tagli[i++][1];
+      var lw = q &lt; 1 ? Math.min(w, h) * q : w, lh = q &lt; 1 ? lw : h, k = Math.min(1, max / Math.max(lw, lh));
+      var c = document.createElement(&#x27;canvas&#x27;);
+      c.width = Math.round(lw * k); c.height = Math.round(lh * k);
+      c.getContext(&#x27;2d&#x27;).drawImage(v, (w - lw) / 2, (h - lh) / 2, lw, lh, 0, 0, c.width, c.height);
+      S.decoder(c).then(function (t) {
+        if ($(&#x27;scanner&#x27;).hidden) return;
+        if (t) { if (navigator.vibrate) navigator.vibrate(80); chiudiScanner(); riceviCodice(campo, t, &#x27;cam&#x27;); } else prova();
+      });
+    })();
+  }
+
+  function chiudiScanner() {
+    S.camGiro++;
+    clearTimeout(S.camTimer);
+    $(&#x27;scanner&#x27;).classList.remove(&#x27;ko&#x27;);
+    $(&#x27;scanFoto&#x27;).textContent = &#x27;Scatta&#x27;;
+    if (S.camStream) { S.camStream.getTracks().forEach(function (t) { t.stop(); }); S.camStream = null; }
+    $(&#x27;camVideo&#x27;).srcObject = null;
+    $(&#x27;scanner&#x27;).hidden = true;
+    document.body.classList.remove(&#x27;lock&#x27;);
+    segnaAttivo(&#x27;cam&#x27;, &#x27;&#x27;, false);
+  }
+
+  /** Foto scattata col telefono: cerca il codice a più risoluzioni. */
+  function leggiFotoCodice(e) {
+    var f = e.target.files &amp;&amp; e.target.files[0], campo = S.camCampo || &#x27;q&#x27;;
+    e.target.value = &#x27;&#x27;;
+    if (!f) return;
+    dialogo(&#x27;&lt;div class=&quot;spinner&quot;&gt;&lt;/div&gt;&lt;h3&gt;Leggo il codice…&lt;/h3&gt;&#x27;);
+    var url = URL.createObjectURL(f), img = new Image();
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      preparaDecoder().then(function (dec) {
+        var lati = [1600, 1000, 2400], i = 0;
+        (function prova() {
+          if (i &gt;= lati.length) {
+            erroreDialogo(&#x27;Codice non trovato&#x27;, new Error(&#x27;Nella foto non trovo un DataMatrix leggibile: avvicinati, metti a fuoco e cerca più luce.&#x27;));
+            return;
+          }
+          var k = Math.min(1, lati[i++] / Math.max(img.width, img.height));
+          var c = document.createElement(&#x27;canvas&#x27;);
+          c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+          c.getContext(&#x27;2d&#x27;).drawImage(img, 0, 0, c.width, c.height);
+          dec(c).then(function (t) { if (t) { chiudiDialogo(); riceviCodice(campo, t, &#x27;cam&#x27;); } else prova(); });
+        })();
+      }).catch(function (err) { erroreDialogo(&#x27;Lettore non disponibile&#x27;, err); });
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); erroreDialogo(&#x27;Foto non leggibile&#x27;, new Error(&#x27;Riprova a scattare la foto.&#x27;)); };
+    img.src = url;
+  }
+
+  /** Dal testo di un DataMatrix ricava i possibili numeri di serie (report dell&#x27;app, GS1, indirizzo web). */
+  function serialiDaCodice(raw) {
+    var t = String(raw || &#x27;&#x27;).replace(/^\][A-Za-z]\d/, &#x27;&#x27;).trim(), out = [];
+    var m = /^(.+)_(.+)_(.+)_\d{2}\/\d{2}\/\d{4}_\d{2}:\d{2}:\d{2}$/.exec(t); // DataMatrix dei nostri PDF
+    if (m) out.push(m[3]);
+    var g = /\(21\)([^(]+)/.exec(t);
+    if (g) out.push(g[1].trim());
+    else if (/^01\d{14}/.test(t)) {
+      var fissi = { &#x27;00&#x27;: 18, &#x27;01&#x27;: 14, &#x27;02&#x27;: 14, &#x27;11&#x27;: 6, &#x27;12&#x27;: 6, &#x27;13&#x27;: 6, &#x27;15&#x27;: 6, &#x27;16&#x27;: 6, &#x27;17&#x27;: 6, &#x27;20&#x27;: 2 }, i = 0;
+      while (i &lt; t.length - 1) {
+        if (t.charAt(i) === &#x27;\u001d&#x27;) { i++; continue; }
+        var ai = t.substr(i, 2);
+        if (fissi[ai]) { i += 2 + fissi[ai]; continue; }
+        var fine = t.indexOf(&#x27;\u001d&#x27;, i + 2); if (fine &lt; 0) fine = t.length;
+        if (ai === &#x27;21&#x27;) { out.push(t.slice(i + 2, fine)); break; }
+        i = fine + 1;
+      }
+    }
+    if (/^https?:\/\//i.test(t)) {
+      try {
+        var u = new URL(t), p = u.searchParams;
+        var sn = p.get(&#x27;sn&#x27;) || p.get(&#x27;serial&#x27;) || p.get(&#x27;serialnumber&#x27;) || p.get(&#x27;s&#x27;);
+        if (sn) out.push(sn);
+        var seg = u.pathname.split(&#x27;/&#x27;).filter(Boolean).pop();
+        if (seg) out.push(decodeURIComponent(seg));
+      } catch (e) { /* non è un indirizzo valido */ }
+    }
+    return out.filter(function (x, i, a) { return x &amp;&amp; x !== t &amp;&amp; a.indexOf(x) === i; });
+  }
+
+  function riceviCodice(campo, valore, fonte) {
+    fermaNfc();
+    segnaAttivo(&#x27;cam&#x27;, &#x27;&#x27;, false);
+    chiudiDialogo();
+    valore = String(valore || &#x27;&#x27;).trim();
+    if (!valore) return;
+    if (campo === &#x27;nfc&#x27;) {
+      var el = $(&#x27;nfc&#x27;);
+      el.value = fonte === &#x27;nfc&#x27; ? valore.toLowerCase() : valore;
+      el.classList.remove(&#x27;err&#x27;, &#x27;lampo&#x27;); void el.offsetWidth; el.classList.add(&#x27;lampo&#x27;);
+      apriSez(2, false);
+      aggiorna();
+      return;
+    }
+    var alt = fonte === &#x27;cam&#x27; ? serialiDaCodice(valore) : [];
+    var mostrato = alt.length ? alt[0] : valore;
+    S.scan = fonte === &#x27;cam&#x27; ? { raw: valore, seriale: alt[0] || &#x27;&#x27;, alt: alt.concat([valore]), mostrato: mostrato } : null;
+    $(&#x27;q&#x27;).value = mostrato;
+    cerca();
+  }
+
+  /* ---------- 1. ricerca e storico ---------- */
+  function cerca() {
+    var t = $(&#x27;q&#x27;).value.trim();
+    if (t.length &lt; 2) { mostraMsg(&#x27;warn&#x27;, &#x27;Scrivi un codice NFC o un numero di serie.&#x27;); return; }
+    $(&#x27;risultati&#x27;).innerHTML = &#x27;&lt;div class=&quot;msg info&quot;&gt;Ricerca nel database…&lt;/div&gt;&#x27;;
+    $(&#x27;btnCerca&#x27;).disabled = true;
+    var scan = S.scan &amp;&amp; S.scan.mostrato === t ? S.scan : null;
+    run(&#x27;cercaDispositivo&#x27;, { testo: t, alternative: scan ? scan.alt : [] }).then(function (r) {
+      $(&#x27;btnCerca&#x27;).disabled = false;
+      S.gruppi = raggruppa(r.risultati || []);
+      S.gruppoSel = -1;
+      if (!S.gruppi.length) {
+        if (scan) {
+          if (!$(&#x27;nfc&#x27;).value &amp;&amp; !/_\d{2}\/\d{2}\/\d{4}_\d{2}:\d{2}:\d{2}$/.test(scan.raw)) $(&#x27;nfc&#x27;).value = scan.raw; // non il codice di un nostro PDF
+          if (scan.seriale &amp;&amp; !$(&#x27;seriale&#x27;).value) $(&#x27;seriale&#x27;).value = scan.seriale.toUpperCase();
+        } else if (sembraNfc(t)) { if (!$(&#x27;nfc&#x27;).value) $(&#x27;nfc&#x27;).value = t.toLowerCase(); }
+        else if (!$(&#x27;seriale&#x27;).value) $(&#x27;seriale&#x27;).value = t.toUpperCase();
+        mostraMsg(&#x27;warn&#x27;, &#x27;Nessuna ispezione precedente per «&#x27; + esc(t) + &#x27;»: è un DPI nuovo, compila i dati.&#x27;);
+        apriSez(2, false);
+        aggiorna();
+        return;
+      }
+      if (S.gruppi.length === 1) usaGruppo(0); else renderRisultati();
+    }).catch(function (e) { $(&#x27;btnCerca&#x27;).disabled = false; mostraMsg(&#x27;ko&#x27;, esc(msgErr(e))); });
+  }
+
+  function raggruppa(lista) {
+    var map = {}, ordine = [];
+    lista.forEach(function (r) {
+      var k = norm(r.id || (r.cliente + r.modello + r.seriale));
+      if (!map[k]) { map[k] = []; ordine.push(k); }
+      map[k].push(r);
+    });
+    return ordine.map(function (k) { return map[k]; });
+  }
+
+  function pillEsito(e) {
+    var u = norm(e);
+    var cls = u === &#x27;OK&#x27; ? &#x27;ok&#x27; : (u.indexOf(&#x27;FUORI&#x27;) === 0 ? &#x27;ko&#x27; : &#x27;wait&#x27;);
+    return &#x27;&lt;span class=&quot;pill &#x27; + cls + &#x27;&quot;&gt;&#x27; + esc(e || &#x27;–&#x27;) + &#x27;&lt;/span&gt;&#x27;;
+  }
+
+  function annoIspezione() { var d = isoToDate($(&#x27;dataIspezione&#x27;).value); return d ? String(d.getFullYear()) : &#x27;&#x27;; }
+
+  function tabella(g, max) {
+    var anno = annoIspezione();
+    var righe = g.slice(0, max || 50).map(function (r) {
+      var a = annoDi(r.dataIspezione);
+      return &#x27;&lt;tr&#x27; + (a &amp;&amp; a === anno ? &#x27; class=&quot;stessoanno&quot;&#x27; : &#x27;&#x27;) + &#x27;&gt;&lt;td class=&quot;anno&quot;&gt;&#x27; + esc(a || &#x27;–&#x27;) + &#x27;&lt;/td&gt;&lt;td&gt;&#x27; + esc(r.dataIspezione) +
+        &#x27;&lt;/td&gt;&lt;td&gt;&#x27; + pillEsito(r.esito) + &#x27;&lt;/td&gt;&lt;td&gt;&#x27; + esc(r.ispettore) + &#x27;&lt;/td&gt;&lt;/tr&gt;&#x27;;
+    }).join(&#x27;&#x27;);
+    return &#x27;&lt;table class=&quot;hist&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Anno&lt;/th&gt;&lt;th&gt;Data&lt;/th&gt;&lt;th&gt;Esito&lt;/th&gt;&lt;th&gt;Isp.&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&#x27; + righe + &#x27;&lt;/tbody&gt;&lt;/table&gt;&#x27;;
+  }
+
+  function renderRisultati() {
+    if (!S.gruppi.length) return;
+    var h = S.gruppi.length &gt; 1 ? &#x27;&lt;div class=&quot;msg info&quot;&gt;Trovati &#x27; + S.gruppi.length + &#x27; DPI con questo codice: scegli quello giusto.&lt;/div&gt;&#x27; : &#x27;&#x27;;
+    S.gruppi.forEach(function (g, i) {
+      var u = g[0], sel = i === S.gruppoSel;
+      if (S.gruppoSel &gt;= 0 &amp;&amp; !sel) return; // mostra solo quello scelto
+      h += &#x27;&lt;div class=&quot;dev&#x27; + (sel ? &#x27; sel&#x27; : &#x27;&#x27;) + &#x27;&quot;&gt;&lt;div class=&quot;dev-head&quot;&gt;&lt;div class=&quot;info&quot;&gt;&#x27; +
+        &#x27;&lt;h3&gt;&#x27; + esc(u.modello) + &#x27;&lt;/h3&gt;&lt;div class=&quot;meta&quot;&gt;&#x27; + esc(u.cliente) + &#x27; · S/N &#x27; + esc(u.seriale) +
+        (u.nfc ? &#x27; · NFC &#x27; + esc(u.nfc) : &#x27;&#x27;) + &#x27;&lt;/div&gt;&lt;/div&gt;&#x27; +
+        &#x27;&lt;div class=&quot;count&quot;&gt;&lt;b&gt;&#x27; + g.length + &#x27;&lt;/b&gt;&lt;small&gt;&#x27; + (g.length === 1 ? &#x27;ispez.&#x27; : &#x27;ispez.&#x27;) + &#x27;&lt;/small&gt;&lt;/div&gt;&lt;/div&gt;&#x27; +
+        (sel || S.gruppi.length === 1 ? tabella(g) : &#x27;&lt;button type=&quot;button&quot; class=&quot;btn&quot; data-g=&quot;&#x27; + i + &#x27;&quot;&gt;Usa questo DPI&lt;/button&gt;&#x27;) + &#x27;&lt;/div&gt;&#x27;;
+    });
+    if (S.gruppoSel &gt;= 0 &amp;&amp; S.gruppi.length &gt; 1) h += &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; style=&quot;width:100%;margin-top:8px;height:40px&quot; id=&quot;btnAltri&quot;&gt;Mostra tutti i &#x27; + S.gruppi.length + &#x27; DPI trovati&lt;/button&gt;&#x27;;
+    var dup = doppioniLocali();
+    if (dup.length) h += &#x27;&lt;div class=&quot;msg warn&quot;&gt;Già ispezionato nel &#x27; + esc(annoIspezione()) + &#x27; (&#x27; + dup.map(function (r) { return esc(r.dataIspezione) + &#x27;, &#x27; + esc(r.esito); }).join(&#x27;; &#x27;) + &#x27;). Se salvi verrà registrata un\&#x27;altra ispezione.&lt;/div&gt;&#x27;;
+    $(&#x27;risultati&#x27;).innerHTML = h;
+    each(&#x27;button[data-g]&#x27;, function (b) { b.addEventListener(&#x27;click&#x27;, function () { usaGruppo(+b.getAttribute(&#x27;data-g&#x27;)); }); }, $(&#x27;risultati&#x27;));
+    if ($(&#x27;btnAltri&#x27;)) $(&#x27;btnAltri&#x27;).addEventListener(&#x27;click&#x27;, function () { S.gruppoSel = -1; renderRisultati(); });
+  }
+
+  function doppioniLocali() {
+    if (S.gruppoSel &lt; 0 || !S.gruppi[S.gruppoSel]) return [];
+    var anno = annoIspezione();
+    return S.gruppi[S.gruppoSel].filter(function (r) { return anno &amp;&amp; annoDi(r.dataIspezione) === anno; });
+  }
+
+  function usaGruppo(i) {
+    S.gruppoSel = i;
+    var r = S.gruppi[i][0];
+    setVal(&#x27;categoria&#x27;, categoriaDaLista(r.categoria), true);
+    setVal(&#x27;cliente&#x27;, r.cliente || &#x27;&#x27;, true);
+    setVal(&#x27;produttore&#x27;, r.produttore || &#x27;&#x27;, true);
+    setVal(&#x27;modello&#x27;, r.modello || &#x27;&#x27;, true);
+    $(&#x27;utilizzatore&#x27;).value = (r.utilizzatore &amp;&amp; r.utilizzatore !== &#x27;-&#x27;) ? r.utilizzatore : &#x27;&#x27;;
+    $(&#x27;seriale&#x27;).value = r.seriale || &#x27;&#x27;;
+    $(&#x27;nfc&#x27;).value = r.nfc || (sembraNfc($(&#x27;q&#x27;).value.trim()) ? $(&#x27;q&#x27;).value.trim().toLowerCase() : &#x27;&#x27;);
+    var prod = itToIso(r.dataProduzione);
+    $(&#x27;dataProduzione&#x27;).value = prod;
+    var primo = itToIso(r.primoUtilizzo);
+    $(&#x27;primoDiverso&#x27;).checked = !!(primo &amp;&amp; primo !== prod);
+    $(&#x27;boxPrimo&#x27;).hidden = !$(&#x27;primoDiverso&#x27;).checked;
+    $(&#x27;dataPrimo&#x27;).value = $(&#x27;primoDiverso&#x27;).checked ? primo : &#x27;&#x27;;
+    var dur = String(r.durata || &#x27;&#x27;).trim();
+    if (dur &amp;&amp; Array.prototype.some.call($(&#x27;durata&#x27;).options, function (o) { return o.value === dur; })) { $(&#x27;durata&#x27;).value = dur; S.durataToccata = true; }
+    each(&#x27;.err&#x27;, function (el) { el.classList.remove(&#x27;err&#x27;); });
+    renderRisultati();
+    aggiorna();
+    if (sez2Completa()) { chiudiSez(2); apriSez(3, false); }
+  }
+
+  function categoriaDaLista(c) {
+    var n = norm(c);
+    var t = (S.boot.categorie || []).filter(function (x) { return norm(x) === n; })[0];
+    return t || c || &#x27;&#x27;;
+  }
+
+  /* ---------- tendine con ricerca ---------- */
+  function setVal(campo, v, silenzioso) {
+    var prima = $(campo).value;
+    $(campo).value = v;
+    var b = document.querySelector(&#x27;.pick[data-pick=&quot;&#x27; + campo + &#x27;&quot;]&#x27;);
+    b.querySelector(&#x27;.v&#x27;).textContent = v || CAMPI[campo].vuoto;
+    b.classList.toggle(&#x27;has&#x27;, !!v);
+    b.classList.remove(&#x27;err&#x27;);
+    if (campo === &#x27;categoria&#x27; &amp;&amp; prima !== v) caricaControlli();
+    if (campo === &#x27;cliente&#x27; &amp;&amp; v &amp;&amp; !silenzioso) ricordaCliente(v);
+    if (campo === &#x27;modello&#x27; &amp;&amp; prima !== v) {
+      suggerisciDurata();
+      if (v &amp;&amp; !$(&#x27;produttore&#x27;).value) {
+        var p = produttorePerModello(v);
+        if (p) setVal(&#x27;produttore&#x27;, p, true);
+      }
+    }
+    aggiorna();
+  }
+
+  function ricordaCliente(v) {
+    var r = [];
+    try { r = JSON.parse(lsGet(&#x27;clientiRecenti&#x27;) || &#x27;[]&#x27;); } catch (e) { r = []; }
+    r = [v].concat(r.filter(function (x) { return norm(x) !== norm(v); })).slice(0, 6);
+    lsSet(&#x27;clientiRecenti&#x27;, JSON.stringify(r));
+  }
+
+  function produttorePerModello(m) {
+    var n = norm(m), best = null;
+    S.boot.storico.forEach(function (s) { if (norm(s[2]) === n &amp;&amp; (!best || s[3] &gt; best[3])) best = s; });
+    return best ? best[0] : &#x27;&#x27;;
+  }
+
+  function sommaPer(filtro, idx) {
+    var c = {}, ord = [];
+    S.boot.storico.forEach(function (s) {
+      if (!filtro(s)) return;
+      var k = norm(s[idx]);
+      if (!c[k]) { c[k] = { v: s[idx], n: 0 }; ord.push(k); }
+      c[k].n += s[3];
+    });
+    return ord.map(function (k) { return c[k]; }).sort(function (a, b) { return b.n - a.n; });
+  }
+
+  function opzioni(campo) {
+    var b = S.boot, cat = norm($(&#x27;categoria&#x27;).value), prod = norm($(&#x27;produttore&#x27;).value);
+    if (campo === &#x27;categoria&#x27;) return { tutti: b.categorie, sugg: [], titSugg: &#x27;&#x27; };
+    if (campo === &#x27;cliente&#x27;) {
+      var rec = [];
+      try { rec = JSON.parse(lsGet(&#x27;clientiRecenti&#x27;) || &#x27;[]&#x27;); } catch (e) { rec = []; }
+      return { tutti: b.clienti.map(function (c) { return c.nome; }), sugg: rec.map(function (v) { return { v: v }; }), titSugg: &#x27;Usati di recente&#x27; };
+    }
+    if (campo === &#x27;produttore&#x27;) {
+      var sp = cat ? sommaPer(function (s) { return norm(s[1]) === cat; }, 0).slice(0, 8) : [];
+      return { tutti: b.produttori, sugg: sp, titSugg: &#x27;Già ispezionati con questa categoria&#x27; };
+    }
+    // modello
+    var sm = [], tit = &#x27;&#x27;;
+    if (prod &amp;&amp; cat) { sm = sommaPer(function (s) { return norm(s[0]) === prod &amp;&amp; norm(s[1]) === cat; }, 2); tit = &#x27;Già ispezionati · &#x27; + $(&#x27;produttore&#x27;).value + &#x27; + categoria&#x27;; }
+    if (!sm.length &amp;&amp; prod) { sm = sommaPer(function (s) { return norm(s[0]) === prod; }, 2); tit = &#x27;Già ispezionati · &#x27; + $(&#x27;produttore&#x27;).value; }
+    if (!sm.length &amp;&amp; cat) { sm = sommaPer(function (s) { return norm(s[1]) === cat; }, 2); tit = &#x27;Già ispezionati con questa categoria&#x27;; }
+    return { tutti: b.modelli.map(function (m) { return m.nome; }), sugg: sm.slice(0, 12), titSugg: tit };
+  }
+
+  function apriPicker(campo) {
+    if (!S.boot) return;
+    S.picker = campo;
+    $(&#x27;sheetTitle&#x27;).textContent = CAMPI[campo].titolo;
+    $(&#x27;sheetInput&#x27;).value = &#x27;&#x27;;
+    $(&#x27;sheetInput&#x27;).placeholder = campo === &#x27;categoria&#x27; ? &#x27;Cerca per codice o nome (es. IMB, casco)…&#x27; : &#x27;Scrivi per cercare…&#x27;;
+    renderPicker();
+    $(&#x27;sheet&#x27;).hidden = false;
+    document.body.classList.add(&#x27;lock&#x27;);
+    setTimeout(function () { $(&#x27;sheetInput&#x27;).focus(); }, 80);
+  }
+  function chiudiPicker() { $(&#x27;sheet&#x27;).hidden = true; document.body.classList.remove(&#x27;lock&#x27;); S.picker = null; }
+
+  function evidenzia(t, parole) {
+    var up = piega(t);
+    if (!parole.length || up.length !== t.length) return esc(t);
+    var seg = new Array(t.length).fill(false);
+    parole.forEach(function (w) {
+      var i = up.indexOf(w);
+      while (i &gt;= 0) { for (var k = i; k &lt; i + w.length; k++) seg[k] = true; i = up.indexOf(w, i + w.length); }
+    });
+    var out = &#x27;&#x27;, dentro = false;
+    for (var j = 0; j &lt; t.length; j++) {
+      if (seg[j] &amp;&amp; !dentro) { out += &#x27;&lt;mark&gt;&#x27;; dentro = true; }
+      if (!seg[j] &amp;&amp; dentro) { out += &#x27;&lt;/mark&gt;&#x27;; dentro = false; }
+      out += esc(t[j]);
+    }
+    return out + (dentro ? &#x27;&lt;/mark&gt;&#x27; : &#x27;&#x27;);
+  }
+
+  function renderPicker() {
+    var campo = S.picker; if (!campo) return;
+    var q = $(&#x27;sheetInput&#x27;).value, qn = norm(q);
+    var parole = qn ? qn.split(&#x27; &#x27;) : [];
+    var o = opzioni(campo), attuale = norm($(campo).value);
+    var items = [], h = &#x27;&#x27;;
+    function voce(v, extra, cls) {
+      items.push(v);
+      return &#x27;&lt;button type=&quot;button&quot; class=&quot;opt&#x27; + (cls ? &#x27; &#x27; + cls : &#x27;&#x27;) + &#x27;&quot; data-i=&quot;&#x27; + (items.length - 1) + &#x27;&quot;&gt;&lt;span class=&quot;tx&quot;&gt;&#x27; +
+        (cls === &#x27;new&#x27; ? &#x27;Usa «&#x27; + esc(v) + &#x27;»&#x27; : evidenzia(v, parole)) + &#x27;&lt;/span&gt;&#x27; +
+        (extra ? &#x27;&lt;span class=&quot;cnt&quot;&gt;&#x27; + esc(extra) + &#x27;&lt;/span&gt;&#x27; : &#x27;&#x27;) + (norm(v) === attuale &amp;&amp; cls !== &#x27;new&#x27; ? &#x27;&lt;span class=&quot;tick&quot;&gt;✓&lt;/span&gt;&#x27; : &#x27;&#x27;) + &#x27;&lt;/button&gt;&#x27;;
+    }
+    var trovati = [];
+    if (parole.length) {
+      o.tutti.forEach(function (v) {
+        var n = norm(v);
+        if (parole.every(function (w) { return n.indexOf(w) &gt;= 0; })) trovati.push({ v: v, p: n.indexOf(parole[0]) === 0 ? 0 : 1 });
+      });
+      trovati.sort(function (a, b) { return a.p - b.p; });
+      var esatto = o.tutti.some(function (v) { return norm(v) === qn; });
+      var sugg = o.sugg.filter(function (s) { var n = norm(s.v); return parole.every(function (w) { return n.indexOf(w) &gt;= 0; }); });
+      var nuovoOk = CAMPI[campo].nuovo &amp;&amp; !esatto;
+      if (!trovati.length &amp;&amp; !sugg.length) {
+        // nessun risultato: il valore scritto diventa la prima scelta
+        if (nuovoOk) { h += voce(q.trim().toUpperCase(), &#x27;&#x27;, &#x27;new&#x27;); h += &#x27;&lt;div class=&quot;vuoto&quot;&gt;Non è nell\&#x27;elenco: verrà salvato come valore nuovo.&lt;/div&gt;&#x27;; }
+        else h += &#x27;&lt;div class=&quot;vuoto&quot;&gt;Nessun risultato per «&#x27; + esc(q) + &#x27;».&lt;/div&gt;&#x27;;
+      } else {
+        if (sugg.length) { h += &#x27;&lt;div class=&quot;grp&quot;&gt;&#x27; + esc(o.titSugg) + &#x27;&lt;/div&gt;&#x27;; sugg.forEach(function (s) { h += voce(s.v, s.n ? s.n + &#x27; isp.&#x27; : &#x27;&#x27;); }); }
+        if (trovati.length) {
+          h += &#x27;&lt;div class=&quot;grp&quot;&gt;Risultati (&#x27; + trovati.length + &#x27;)&lt;/div&gt;&#x27;;
+          trovati.slice(0, 80).forEach(function (t) { h += voce(t.v); });
+          if (trovati.length &gt; 80) h += &#x27;&lt;div class=&quot;vuoto&quot;&gt;Scrivi altre lettere per restringere la ricerca.&lt;/div&gt;&#x27;;
+        }
+        if (nuovoOk) { h += &#x27;&lt;div class=&quot;grp&quot;&gt;Non trovi quello giusto?&lt;/div&gt;&#x27;; h += voce(q.trim().toUpperCase(), &#x27;&#x27;, &#x27;new&#x27;); }
+      }
+    } else {
+      if (o.sugg.length) { h += &#x27;&lt;div class=&quot;grp&quot;&gt;&#x27; + esc(o.titSugg) + &#x27;&lt;/div&gt;&#x27;; o.sugg.forEach(function (s) { h += voce(s.v, s.n ? s.n + &#x27; isp.&#x27; : &#x27;&#x27;); }); }
+      h += &#x27;&lt;div class=&quot;grp&quot;&gt;Tutti (&#x27; + o.tutti.length + &#x27;)&lt;/div&gt;&#x27;;
+      o.tutti.slice(0, 150).forEach(function (v) { h += voce(v); });
+      if (o.tutti.length &gt; 150) h += &#x27;&lt;div class=&quot;vuoto&quot;&gt;Scrivi per cercare tra tutti i &#x27; + o.tutti.length + &#x27; valori.&lt;/div&gt;&#x27;;
+    }
+    S.items = items;
+    $(&#x27;sheetList&#x27;).innerHTML = h;
+    $(&#x27;sheetList&#x27;).scrollTop = 0;
+    var primo = $(&#x27;sheetList&#x27;).querySelector(&#x27;.opt&#x27;); if (primo &amp;&amp; parole.length) primo.classList.add(&#x27;kb&#x27;);
+  }
+
+  function scegli(v) {
+    var campo = S.picker;
+    chiudiPicker();
+    setVal(campo, v);
+    // passaggio automatico al campo successivo, solo se è vuoto
+    setTimeout(function () {
+      if (campo === &#x27;categoria&#x27; &amp;&amp; !$(&#x27;cliente&#x27;).value) apriPicker(&#x27;cliente&#x27;);
+      else if (campo === &#x27;produttore&#x27; &amp;&amp; !$(&#x27;modello&#x27;).value) apriPicker(&#x27;modello&#x27;);
+      else if (campo === &#x27;modello&#x27; &amp;&amp; !$(&#x27;seriale&#x27;).value.trim()) $(&#x27;seriale&#x27;).focus();
+    }, 180);
+  }
+
+  function suggerisciDurata() {
+    if (S.durataToccata || !S.boot) return;
+    var n = norm($(&#x27;modello&#x27;).value);
+    var m = S.boot.modelli.filter(function (x) { return norm(x.nome) === n; })[0];
+    var anni = m &amp;&amp; String(m.anni || &#x27;&#x27;).trim();
+    if (anni &amp;&amp; Array.prototype.some.call($(&#x27;durata&#x27;).options, function (o) { return o.value === anni; })) $(&#x27;durata&#x27;).value = anni;
+  }
+
+  /* ---------- 3. controlli ---------- */
+  function caricaControlli() {
+    var cat = $(&#x27;categoria&#x27;).value;
+    S.controlli = (S.boot &amp;&amp; S.boot.controlli[cat]) || [];
+    S.risposte = {};
+    S.esitoManuale = &#x27;&#x27;;
+    renderControlli();
+    if (cat) apriSez(3, false);
+    aggiorna();
+  }
+
+  function renderControlli() {
+    var box = $(&#x27;controlli&#x27;);
+    $(&#x27;ctlTop&#x27;).hidden = !S.controlli.length;
+    if (!$(&#x27;categoria&#x27;).value) { box.innerHTML = &#x27;&lt;p class=&quot;hint&quot;&gt;Scegli la categoria per vedere i controlli da effettuare.&lt;/p&gt;&#x27;; return; }
+    if (!S.controlli.length) { box.innerHTML = &#x27;&lt;div class=&quot;msg warn&quot;&gt;Nessun controllo configurato in SCHEDA CONTROLLI per questa categoria: scegli l\&#x27;esito al punto 5.&lt;/div&gt;&#x27;; return; }
+    box.innerHTML = S.controlli.map(function (c) {
+      var t = String(c.testo || &#x27;&#x27;), i = t.indexOf(&#x27;:&#x27;);
+      var titolo = i &gt; 0 ? t.slice(0, i) : t, desc = i &gt; 0 ? t.slice(i + 1).trim() : &#x27;&#x27;;
+      var v = S.risposte[c.offset] || &#x27;&#x27;;
+      return &#x27;&lt;div class=&quot;ctl&quot; data-off=&quot;&#x27; + c.offset + &#x27;&quot;&gt;&#x27; +
+        &#x27;&lt;div class=&quot;ctl-head&quot;&gt;&lt;span class=&quot;num&quot;&gt;&#x27; + esc(c.num) + &#x27;&lt;/span&gt;&lt;div&gt;&lt;b&gt;&#x27; + esc(titolo) + &#x27;&lt;/b&gt;&#x27; +
+        (desc ? &#x27;&lt;p&gt;&#x27; + esc(desc) + &#x27;&lt;/p&gt;&#x27; : &#x27;&#x27;) + &#x27;&lt;/div&gt;&lt;/div&gt;&#x27; +
+        &#x27;&lt;div class=&quot;seg&quot;&gt;&lt;button type=&quot;button&quot; data-v=&quot;✔&quot; class=&quot;v-ok&#x27; + (v === &#x27;✔&#x27; ? &#x27; on&#x27; : &#x27;&#x27;) + &#x27;&quot;&gt;✔ OK&lt;/button&gt;&#x27; +
+        &#x27;&lt;button type=&quot;button&quot; data-v=&quot;X&quot; class=&quot;v-ko&#x27; + (v === &#x27;X&#x27; ? &#x27; on&#x27; : &#x27;&#x27;) + &#x27;&quot;&gt;✗ Non OK&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;&#x27;;
+    }).join(&#x27;&#x27;);
+    each(&#x27;.ctl&#x27;, function (el) {
+      var off = +el.getAttribute(&#x27;data-off&#x27;);
+      el.querySelector(&#x27;.seg&#x27;).addEventListener(&#x27;click&#x27;, function (e) {
+        var b = e.target.closest(&#x27;button&#x27;); if (!b) return;
+        S.risposte[off] = b.getAttribute(&#x27;data-v&#x27;);
+        el.classList.remove(&#x27;err-ctl&#x27;);
+        each(&#x27;.seg button&#x27;, function (x) { x.classList.toggle(&#x27;on&#x27;, x === b); }, el);
+        aggiorna();
+        dopoRisposta();
+      });
+      var p = el.querySelector(&#x27;p&#x27;);
+      if (p) p.addEventListener(&#x27;click&#x27;, function () { p.classList.toggle(&#x27;open&#x27;); });
+    }, box);
+  }
+
+  var timerCtl = null;
+  function dopoRisposta() {
+    clearTimeout(timerCtl);
+    if (!S.controlli.length || !S.controlli.every(function (c) { return S.risposte[c.offset]; })) return;
+    timerCtl = setTimeout(function () { chiudiSez(3); apriSez(4, true); }, 450);
+  }
+
+  /* ---------- 4. foto ---------- */
+  function renderFoto() {
+    var g = $(&#x27;fotoGrid&#x27;);
+    g.innerHTML = S.foto.map(function (f, i) {
+      return &#x27;&lt;div class=&quot;foto&quot;&gt;&lt;img src=&quot;data:image/jpeg;base64,&#x27; + f.data + &#x27;&quot; alt=&quot;Foto &#x27; + (i + 1) + &#x27;&quot;&gt;&#x27; +
+        &#x27;&lt;button type=&quot;button&quot; data-i=&quot;&#x27; + i + &#x27;&quot; aria-label=&quot;Rimuovi foto&quot;&gt;×&lt;/button&gt;&lt;/div&gt;&#x27;;
+    }).join(&#x27;&#x27;) + (S.foto.length &lt; 4 ? &#x27;&lt;label class=&quot;foto-add&quot; for=&quot;fotoInput&quot;&gt;&lt;div&gt;&lt;span&gt;+&lt;/span&gt;Aggiungi&lt;/div&gt;&lt;/label&gt;&#x27; : &#x27;&#x27;);
+    each(&#x27;button[data-i]&#x27;, function (b) {
+      b.addEventListener(&#x27;click&#x27;, function () { S.foto.splice(+b.getAttribute(&#x27;data-i&#x27;), 1); renderFoto(); aggiorna(); });
+    }, g);
+  }
+  function aggiungiFoto(e) {
+    var files = Array.prototype.slice.call(e.target.files || [], 0, 4 - S.foto.length);
+    e.target.value = &#x27;&#x27;;
+    files.reduce(function (p, f) {
+      return p.then(function () { return comprimi(f); }).then(function (x) { if (x) S.foto.push(x); renderFoto(); aggiorna(); });
+    }, Promise.resolve());
+  }
+  function comprimi(file) {
+    return new Promise(function (res) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var k = Math.min(1, 1000 / Math.max(img.width, img.height));
+        var w = Math.round(img.width * k), h = Math.round(img.height * k);
+        var c = document.createElement(&#x27;canvas&#x27;); c.width = w; c.height = h;
+        c.getContext(&#x27;2d&#x27;).drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        res({ data: c.toDataURL(&#x27;image/jpeg&#x27;, 0.72).split(&#x27;,&#x27;)[1], w: w, h: h });
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); res(null); };
+      img.src = url;
+    });
+  }
+
+  /* ---------- calcoli e stato ---------- */
+  function scadenza() {
+    var dur = $(&#x27;durata&#x27;).value;
+    if (dur === &#x27;∞&#x27;) return &#x27;∞&#x27;;
+    var primo = isoToDate($(&#x27;primoDiverso&#x27;).checked ? $(&#x27;dataPrimo&#x27;).value : $(&#x27;dataProduzione&#x27;).value);
+    if (!primo) return null;
+    var d = new Date(primo); d.setFullYear(d.getFullYear() + parseInt(dur, 10));
+    return d;
+  }
+
+  function esitoCorrente() {
+    var valori = S.controlli.map(function (c) { return S.risposte[c.offset]; });
+    var scad = scadenza(), dIsp = isoToDate($(&#x27;dataIspezione&#x27;).value);
+    if (valori.indexOf(&#x27;X&#x27;) &gt;= 0) return { v: &#x27;FUORI SERVIZIO&#x27;, motivo: &#x27;controllo non superato&#x27; };
+    if (scad instanceof Date &amp;&amp; dIsp &amp;&amp; scad &lt; dIsp) return { v: &#x27;FUORI SERVIZIO&#x27;, motivo: &#x27;DPI scaduto&#x27; };
+    if (S.controlli.length &amp;&amp; valori.every(function (x) { return x === &#x27;✔&#x27;; })) return { v: &#x27;OK&#x27; };
+    if (!S.controlli.length &amp;&amp; $(&#x27;categoria&#x27;).value &amp;&amp; S.esitoManuale) return { v: S.esitoManuale };
+    return { v: &#x27;IN ATTESA&#x27; };
+  }
+
+  function sez2Completa() {
+    return [&#x27;categoria&#x27;, &#x27;cliente&#x27;, &#x27;produttore&#x27;, &#x27;modello&#x27;, &#x27;seriale&#x27;].every(function (id) { return $(id).value.trim(); }) &amp;&amp;
+      (!$(&#x27;primoDiverso&#x27;).checked || $(&#x27;dataPrimo&#x27;).value);
+  }
+  function codice(cat) { var i = String(cat).indexOf(&#x27; - &#x27;); return i &gt; 0 ? cat.slice(0, i) : String(cat).split(&#x27; &#x27;)[0]; }
+
+  function aggiorna() {
+    if (!S.boot) return;
+    // agente
+    var n = norm($(&#x27;cliente&#x27;).value);
+    var c = S.boot.clienti.filter(function (x) { return norm(x.nome) === n; })[0];
+    $(&#x27;agente&#x27;).textContent = c ? (c.agente ? &#x27;Agente: &#x27; + c.agente + (c.email ? &#x27; · &#x27; + c.email : &#x27;&#x27;) : &#x27;Nessun agente associato&#x27;) :
+      ($(&#x27;cliente&#x27;).value ? &#x27;Cliente nuovo (non presente in LISTA ISPETTORI): verrà salvato senza agente.&#x27; : &#x27;&#x27;);
+
+    var sc = scadenza();
+    $(&#x27;scadenza&#x27;).textContent = sc instanceof Date ? fmtIt(sc) : (sc === &#x27;∞&#x27; ? &#x27;∞ (nessuna scadenza)&#x27; : &#x27;–&#x27;);
+
+    // esito
+    var e = esitoCorrente();
+    $(&#x27;esito&#x27;).textContent = e.v;
+    $(&#x27;esito&#x27;).className = &#x27;esito &#x27; + (e.v === &#x27;OK&#x27; ? &#x27;ok&#x27; : e.v === &#x27;FUORI SERVIZIO&#x27; ? &#x27;ko&#x27; : &#x27;wait&#x27;);
+    $(&#x27;boxManuale&#x27;).hidden = !($(&#x27;categoria&#x27;).value &amp;&amp; !S.controlli.length);
+    each(&#x27;button&#x27;, function (b) { b.classList.toggle(&#x27;on&#x27;, b.getAttribute(&#x27;data-v&#x27;) === S.esitoManuale); }, $(&#x27;segManuale&#x27;));
+
+    var dIsp = isoToDate($(&#x27;dataIspezione&#x27;).value), mesi = +$(&#x27;mesi&#x27;).value, avvisi = [];
+    if (e.v === &#x27;FUORI SERVIZIO&#x27;) {
+      $(&#x27;prossima&#x27;).textContent = &#x27;/&#x27;;
+      if (e.motivo) avvisi.push(&#x27;&lt;div class=&quot;msg ko&quot;&gt;Fuori servizio: &#x27; + esc(e.motivo) + &#x27;.&lt;/div&gt;&#x27;);
+    } else if (dIsp) {
+      $(&#x27;prossima&#x27;).textContent = fmtIt(new Date(dIsp.getTime() + Math.round(30.4166666666666 * mesi) * 86400000));
+      if (sc instanceof Date &amp;&amp; sc &gt; dIsp &amp;&amp; sc &lt;= new Date(dIsp.getTime() + 365 * 86400000)) {
+        avvisi.push(&#x27;&lt;div class=&quot;msg warn&quot;&gt;Ultimo anno di utilizzo: il DPI scade il &#x27; + fmtIt(sc) + &#x27;.&lt;/div&gt;&#x27;);
+      }
+    } else $(&#x27;prossima&#x27;).textContent = &#x27;–&#x27;;
+    var dup = doppioniLocali();
+    if (dup.length) avvisi.push(&#x27;&lt;div class=&quot;msg warn&quot;&gt;Questo DPI è già stato ispezionato nel &#x27; + esc(annoIspezione()) + &#x27; (&#x27; + esc(dup[0].dataIspezione) + &#x27;).&lt;/div&gt;&#x27;);
+    $(&#x27;avvisi&#x27;).innerHTML = avvisi.join(&#x27;&#x27;);
+
+    // riepiloghi sezioni
+    var ok2 = sez2Completa();
+    $(&#x27;sec2&#x27;).classList.toggle(&#x27;done&#x27;, ok2);
+    $(&#x27;sum2&#x27;).textContent = [codice($(&#x27;categoria&#x27;).value), $(&#x27;cliente&#x27;).value, $(&#x27;modello&#x27;).value, $(&#x27;seriale&#x27;).value ? &#x27;S/N &#x27; + $(&#x27;seriale&#x27;).value : &#x27;&#x27;]
+      .filter(Boolean).join(&#x27; · &#x27;);
+    var risp = S.controlli.filter(function (x) { return S.risposte[x.offset]; }).length;
+    var ko = S.controlli.filter(function (x) { return S.risposte[x.offset] === &#x27;X&#x27;; }).length;
+    var ok3 = $(&#x27;categoria&#x27;).value &amp;&amp; (S.controlli.length ? risp === S.controlli.length : true);
+    $(&#x27;sec3&#x27;).classList.toggle(&#x27;done&#x27;, !!ok3);
+    $(&#x27;sum3&#x27;).textContent = !$(&#x27;categoria&#x27;).value ? &#x27;&#x27; : !S.controlli.length ? &#x27;nessun controllo&#x27; :
+      risp + &#x27;/&#x27; + S.controlli.length + (risp === S.controlli.length ? (ko ? &#x27; · &#x27; + ko + &#x27; non OK&#x27; : &#x27; · tutti OK&#x27;) : &#x27;&#x27;);
+    $(&#x27;ctlConta&#x27;).textContent = risp + &#x27; di &#x27; + S.controlli.length + &#x27; controlli fatti&#x27;;
+    var nf = S.foto.length, haNote = !!$(&#x27;note&#x27;).value.trim();
+    $(&#x27;sec4&#x27;).classList.toggle(&#x27;done&#x27;, $(&#x27;sec4&#x27;).getAttribute(&#x27;data-open&#x27;) === &#x27;0&#x27; || nf &gt; 0 || haNote);
+    $(&#x27;sum4&#x27;).textContent = (nf ? nf + (nf === 1 ? &#x27; foto&#x27; : &#x27; foto&#x27;) : &#x27;nessuna foto&#x27;) + (haNote ? &#x27; · note&#x27; : &#x27;&#x27;);
+
+    // barra in basso
+    var mancanti = elencoMancanti();
+    var req = [&#x27;categoria&#x27;, &#x27;cliente&#x27;, &#x27;produttore&#x27;, &#x27;modello&#x27;, &#x27;seriale&#x27;, &#x27;dataIspezione&#x27;];
+    var tot = req.length + 1 + Math.max(S.controlli.length, 1);
+    var fatti = req.filter(function (id) { return $(id).value.trim(); }).length + ($(&#x27;ispettore&#x27;).value ? 1 : 0) +
+      (S.controlli.length ? risp : (S.esitoManuale ? 1 : 0));
+    $(&#x27;prog&#x27;).style.width = Math.round(100 * fatti / tot) + &#x27;%&#x27;;
+    $(&#x27;stato&#x27;).innerHTML = (S.controlli.length ? &#x27;&lt;b&gt;&#x27; + risp + &#x27;/&#x27; + S.controlli.length + &#x27;&lt;/b&gt; controlli · &#x27; : &#x27;&#x27;) +
+      (mancanti.length ? &#x27;mancano: &#x27; + esc(mancanti.join(&#x27;, &#x27;)) : &#x27;&lt;b&gt;Pronto per il salvataggio&lt;/b&gt;&#x27;);
+  }
+
+  function elencoMancanti() {
+    var m = [];
+    if (!$(&#x27;ispettore&#x27;).value) m.push(&#x27;ispettore&#x27;);
+    [[&#x27;categoria&#x27;, &#x27;categoria&#x27;], [&#x27;cliente&#x27;, &#x27;cliente&#x27;], [&#x27;produttore&#x27;, &#x27;produttore&#x27;], [&#x27;modello&#x27;, &#x27;modello&#x27;],
+     [&#x27;seriale&#x27;, &#x27;n. serie&#x27;], [&#x27;dataIspezione&#x27;, &#x27;data ispezione&#x27;]].forEach(function (x) { if (!$(x[0]).value.trim()) m.push(x[1]); });
+    if ($(&#x27;primoDiverso&#x27;).checked &amp;&amp; !$(&#x27;dataPrimo&#x27;).value) m.push(&#x27;data primo utilizzo&#x27;);
+    if (S.controlli.some(function (c) { return !S.risposte[c.offset]; })) m.push(&#x27;controlli&#x27;);
+    if ($(&#x27;categoria&#x27;).value &amp;&amp; !S.controlli.length &amp;&amp; !S.esitoManuale) m.push(&#x27;esito&#x27;);
+    return m;
+  }
+
+  function evidenziaErrori(soloSez) {
+    var primo = null;
+    function segna(el) { el.classList.add(&#x27;err&#x27;); if (!primo) primo = el; }
+    if (!soloSez &amp;&amp; !$(&#x27;ispettore&#x27;).value) segna($(&#x27;ispettore&#x27;));
+    var mancaSez2 = false;
+    each(&#x27;[data-req]&#x27;, function (el) {
+      if (el.value.trim()) return;
+      if (soloSez &amp;&amp; el.id === &#x27;dataIspezione&#x27;) return;
+      if (el.id !== &#x27;dataIspezione&#x27;) mancaSez2 = true;
+      var vis = el.type === &#x27;hidden&#x27; ? document.querySelector(&#x27;.pick[data-pick=&quot;&#x27; + el.id + &#x27;&quot;]&#x27;) : el;
+      segna(vis);
+    });
+    if ($(&#x27;primoDiverso&#x27;).checked &amp;&amp; !$(&#x27;dataPrimo&#x27;).value) { mancaSez2 = true; segna($(&#x27;dataPrimo&#x27;)); }
+    if (mancaSez2) apriSez(2, false);
+    if (!soloSez) {
+      var mancaCtl = false;
+      each(&#x27;.ctl&#x27;, function (el) {
+        if (!S.risposte[+el.getAttribute(&#x27;data-off&#x27;)]) { el.classList.add(&#x27;err-ctl&#x27;); mancaCtl = true; if (!primo) primo = el; }
+      });
+      if (mancaCtl) apriSez(3, false);
+      if ($(&#x27;categoria&#x27;).value &amp;&amp; !S.controlli.length &amp;&amp; !S.esitoManuale &amp;&amp; !primo) primo = $(&#x27;boxManuale&#x27;);
+    }
+    if (primo) setTimeout(function () { primo.scrollIntoView({ behavior: &#x27;smooth&#x27;, block: &#x27;center&#x27; }); }, 60);
+  }
+
+  /* ---------- salvataggio ---------- */
+  function salva(conferma) {
+    if (elencoMancanti().length) { evidenziaErrori(); return; }
+    var payload = {
+      nfc: $(&#x27;nfc&#x27;).value.trim(),
+      cliente: $(&#x27;cliente&#x27;).value, utilizzatore: $(&#x27;utilizzatore&#x27;).value,
+      produttore: $(&#x27;produttore&#x27;).value, modello: $(&#x27;modello&#x27;).value, seriale: $(&#x27;seriale&#x27;).value,
+      categoria: $(&#x27;categoria&#x27;).value,
+      dataIspezione: $(&#x27;dataIspezione&#x27;).value, dataProduzione: $(&#x27;dataProduzione&#x27;).value,
+      primoUtilizzoDiverso: $(&#x27;primoDiverso&#x27;).checked, dataPrimoUtilizzo: $(&#x27;dataPrimo&#x27;).value,
+      durata: $(&#x27;durata&#x27;).value,
+      controlli: S.controlli.map(function (c) { return { offset: c.offset, num: c.num, esito: S.risposte[c.offset] }; }),
+      esitoManuale: S.esitoManuale,
+      note: $(&#x27;note&#x27;).value, mesi: $(&#x27;mesi&#x27;).value, ispettore: $(&#x27;ispettore&#x27;).value,
+      confermaDoppione: !!conferma, ts: Date.now(), modificaDi: S.modifica || &#x27;&#x27;
+    };
+    var foto = S.foto.slice();
+    dialogo(&#x27;&lt;div class=&quot;spinner&quot;&gt;&lt;/div&gt;&lt;h3&gt;Salvataggio in corso…&lt;/h3&gt;&lt;p&gt;Aggiorno il database, bastano pochi secondi.&lt;/p&gt;&#x27;);
+    $(&#x27;btnSalva&#x27;).disabled = true;
+    run(&#x27;salvaIspezione&#x27;, payload).then(function (r) {
+      $(&#x27;btnSalva&#x27;).disabled = false;
+      if (r &amp;&amp; r.doppione) {
+        dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--wait-bg);color:var(--wait)&quot;&gt;!&lt;/div&gt;&#x27; +
+          &#x27;&lt;h3&gt;Già ispezionato nel &#x27; + esc(r.anno) + &#x27;&lt;/h3&gt;&lt;p&gt;Questo DPI ha già un\&#x27;ispezione registrata quest\&#x27;anno:&lt;/p&gt;&#x27; +
+          tabella(r.doppione.map(function (x) { return { dataIspezione: x.data, esito: x.esito, ispettore: x.ispettore }; })) +
+          &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn-brand&quot; id=&quot;btnConferma&quot;&gt;Salva comunque&lt;/button&gt;&#x27; +
+          &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;btnAnnulla&quot;&gt;Annulla&lt;/button&gt;&lt;/div&gt;&#x27;);
+        $(&#x27;btnConferma&#x27;).addEventListener(&#x27;click&#x27;, function () { salva(true); });
+        $(&#x27;btnAnnulla&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+        return;
+      }
+      avviaPdf(payload, foto);
+      fineModifica();
+      var cls = r.esito === &#x27;OK&#x27; ? &#x27;ok&#x27; : &#x27;ko&#x27;;
+      dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--&#x27; + cls + &#x27;-bg);color:var(--&#x27; + cls + &#x27;)&quot;&gt;&#x27; + (cls === &#x27;ok&#x27; ? &#x27;✔&#x27; : &#x27;✗&#x27;) + &#x27;&lt;/div&gt;&#x27; +
+        &#x27;&lt;h3&gt;&#x27; + (r.modifica ? &#x27;Modifica salvata&#x27; : &#x27;Ispezione salvata&#x27;) + &#x27;&lt;/h3&gt;&lt;p&gt;Esito: &#x27; + pillEsito(r.esito) + &#x27;&lt;/p&gt;&#x27; +
+        &#x27;&lt;p&gt;Prossima ispezione: &lt;b&gt;&#x27; + esc(r.prossima) + &#x27;&lt;/b&gt; · Ispezione n. &#x27; + esc(r.nIspezioni) + &#x27;&lt;/p&gt;&#x27; +
+        &#x27;&lt;p class=&quot;pdf-dlg wait&quot; id=&quot;dlgPdf&quot; data-ts=&quot;&#x27; + payload.ts + &#x27;&quot;&gt;&lt;i class=&quot;mini-spin&quot;&gt;&lt;/i&gt;&lt;span&gt;PDF in preparazione… puoi già iniziare la prossima ispezione.&lt;/span&gt;&lt;/p&gt;&#x27; +
+        &#x27;&lt;p style=&quot;font-size:13px&quot;&gt;Il report resta in &lt;b&gt;Report&lt;/b&gt; (in alto) finché non lo confermi.&lt;/p&gt;&#x27; +
+        &#x27;&lt;div class=&quot;actions&quot;&gt;&#x27; +
+        &#x27;&lt;button type=&quot;button&quot; class=&quot;btn&quot; data-a=&quot;modello&quot;&gt;Nuova ispezione · stesso modello&lt;/button&gt;&#x27; +
+        &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; data-a=&quot;cliente&quot;&gt;Nuova ispezione · stesso cliente&lt;/button&gt;&#x27; +
+        &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; data-a=&quot;tutto&quot;&gt;Nuova ispezione&lt;/button&gt;&lt;/div&gt;&#x27;);
+      each(&#x27;button[data-a]&#x27;, function (b) { b.addEventListener(&#x27;click&#x27;, function () { nuova(b.getAttribute(&#x27;data-a&#x27;)); }); }, $(&#x27;dialog&#x27;));
+    }).catch(function (err) {
+      $(&#x27;btnSalva&#x27;).disabled = false;
+      dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--ko-bg);color:var(--ko)&quot;&gt;!&lt;/div&gt;&lt;h3&gt;Salvataggio non riuscito&lt;/h3&gt;&#x27; +
+        &#x27;&lt;p&gt;&#x27; + esc(msgErr(err)) + &#x27;&lt;/p&gt;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;btnChiudi&quot;&gt;Chiudi&lt;/button&gt;&lt;/div&gt;&#x27;);
+      $(&#x27;btnChiudi&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+    });
+  }
+
+  /* ---------- PDF in secondo piano ---------- */
+  var pdfInCorso = 0;
+  window.addEventListener(&#x27;beforeunload&#x27;, function (ev) {
+    if (pdfInCorso &gt; 0) { ev.preventDefault(); ev.returnValue = &#x27;&#x27;; }
+  });
+
+  function avviaPdf(payload, foto) {
+    var nome = [payload.cliente, payload.modello, payload.seriale].join(&#x27; · &#x27;);
+    var job = document.createElement(&#x27;div&#x27;);
+    $(&#x27;pdfJobs&#x27;).appendChild(job);
+    function stato(cls, html, dlg) {
+      job.className = &#x27;pdf-job &#x27; + cls;
+      job.innerHTML = html;
+      var d = $(&#x27;dlgPdf&#x27;);
+      if (d &amp;&amp; d.getAttribute(&#x27;data-ts&#x27;) === String(payload.ts)) { d.className = &#x27;pdf-dlg &#x27; + cls; d.innerHTML = dlg; }
+    }
+    function vai() {
+      pdfInCorso++;
+      stato(&#x27;wait&#x27;, &#x27;&lt;i class=&quot;mini-spin&quot;&gt;&lt;/i&gt;&lt;span&gt;PDF in preparazione · &#x27; + esc(nome) + &#x27;&lt;/span&gt;&#x27;,
+        &#x27;&lt;i class=&quot;mini-spin&quot;&gt;&lt;/i&gt;&lt;span&gt;PDF in preparazione… puoi già iniziare la prossima ispezione.&lt;/span&gt;&#x27;);
+      run(&#x27;creaPdfIspezione&#x27;, Object.assign({}, payload, { foto: foto })).then(function (r) {
+        var link = &#x27;&lt;a href=&quot;&#x27; + esc(r.pdfUrl) + &#x27;&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;&#x27;;
+        stato(&#x27;ok&#x27;, &#x27;&lt;span&gt;✓ PDF pronto · &#x27; + esc(nome) + &#x27;&lt;/span&gt;&#x27; + link + &#x27;Apri&lt;/a&gt;&lt;button type=&quot;button&quot; data-x aria-label=&quot;Chiudi&quot;&gt;×&lt;/button&gt;&#x27;,
+          &#x27;&lt;span&gt;✓ PDF pronto&lt;/span&gt;&#x27; + link + &#x27;Apri il PDF&lt;/a&gt;&#x27;);
+        setTimeout(function () { job.remove(); }, 60000);
+        aggiornaFatte();
+      }).catch(function (err) {
+        stato(&#x27;ko&#x27;, &#x27;&lt;span&gt;PDF non creato · &#x27; + esc(nome) + &#x27; · &#x27; + esc(msgErr(err)) + &#x27;&lt;/span&gt;&lt;button type=&quot;button&quot; data-retry&gt;Riprova&lt;/button&gt;&lt;button type=&quot;button&quot; data-x aria-label=&quot;Chiudi&quot;&gt;×&lt;/button&gt;&#x27;,
+          &#x27;&lt;span&gt;PDF non creato: usa «Riprova» nel riquadro in basso. L’ispezione è comunque salvata.&lt;/span&gt;&#x27;);
+      }).then(function () { pdfInCorso--; });
+    }
+    job.addEventListener(&#x27;click&#x27;, function (ev) {
+      var t = ev.target;
+      if (t.hasAttribute(&#x27;data-x&#x27;)) job.remove();
+      else if (t.hasAttribute(&#x27;data-retry&#x27;)) vai();
+    });
+    vai();
+  }
+
+  function nuova(modo) {
+    fineModifica();
+    var tieni = modo === &#x27;tutto&#x27; ? [] : modo === &#x27;cliente&#x27; ? [&#x27;cliente&#x27;, &#x27;utilizzatore&#x27;] :
+      [&#x27;categoria&#x27;, &#x27;cliente&#x27;, &#x27;utilizzatore&#x27;, &#x27;produttore&#x27;, &#x27;modello&#x27;, &#x27;dataProduzione&#x27;, &#x27;durata&#x27;, &#x27;primoDiverso&#x27;, &#x27;dataPrimo&#x27;];
+    var salvati = {};
+    tieni.forEach(function (id) { salvati[id] = $(id).type === &#x27;checkbox&#x27; ? $(id).checked : $(id).value; });
+    var dataIsp = $(&#x27;dataIspezione&#x27;).value, mesi = $(&#x27;mesi&#x27;).value;
+
+    $(&#x27;form&#x27;).reset();
+    [&#x27;categoria&#x27;, &#x27;cliente&#x27;, &#x27;produttore&#x27;, &#x27;modello&#x27;].forEach(function (k) { setVal(k, salvati[k] || &#x27;&#x27;, true); });
+    $(&#x27;dataIspezione&#x27;).value = dataIsp; $(&#x27;mesi&#x27;).value = mesi;
+    $(&#x27;durata&#x27;).value = &#x27;10&#x27;; S.durataToccata = modo === &#x27;modello&#x27;;
+    Object.keys(salvati).forEach(function (id) {
+      if (CAMPI[id]) return;
+      if ($(id).type === &#x27;checkbox&#x27;) $(id).checked = salvati[id]; else $(id).value = salvati[id];
+    });
+    $(&#x27;boxPrimo&#x27;).hidden = !$(&#x27;primoDiverso&#x27;).checked;
+    S.foto = []; S.gruppi = []; S.gruppoSel = -1; S.esitoManuale = &#x27;&#x27;;
+    $(&#x27;risultati&#x27;).innerHTML = &#x27;&#x27;;
+    renderFoto();
+    caricaControlli();
+    [&#x27;2&#x27;, &#x27;3&#x27;, &#x27;4&#x27;].forEach(function (n) { apriSez(n, false); });
+    chiudiDialogo();
+    aggiorna();
+    window.scrollTo({ top: 0, behavior: &#x27;smooth&#x27; });
+    $(&#x27;q&#x27;).focus();
+  }
+
+  /* ---------- ispezioni fatte: modifica e cancellazione ---------- */
+  var fatteReq = 0;
+  function aggiornaFatte() {
+    var n = ++fatteReq;
+    S.fatteCarico = true;
+    if (!$(&#x27;sheetFatte&#x27;).hidden) renderFatte();
+    run(&#x27;elencoIspezioni&#x27;, $(&#x27;ispettore&#x27;).value).then(function (l) {
+      if (n !== fatteReq) return;
+      S.fatte = l || []; S.fatteCarico = false; S.fatteErr = &#x27;&#x27;;
+      $(&#x27;nFatte&#x27;).textContent = S.fatte.length;
+      $(&#x27;btnFatte&#x27;).hidden = false;
+      if (!$(&#x27;sheetFatte&#x27;).hidden) renderFatte();
+    }).catch(function (e) {
+      if (n !== fatteReq) return;
+      S.fatteCarico = false; S.fatteErr = msgErr(e);
+      $(&#x27;btnFatte&#x27;).hidden = false;
+      if (!$(&#x27;sheetFatte&#x27;).hidden) renderFatte();
+    });
+  }
+  function apriFatte() {
+    $(&#x27;sheetFatte&#x27;).hidden = false;
+    document.body.classList.add(&#x27;lock&#x27;);
+    renderFatte();
+    aggiornaFatte();
+  }
+  function chiudiFatte() { $(&#x27;sheetFatte&#x27;).hidden = true; document.body.classList.remove(&#x27;lock&#x27;); }
+
+  function renderFatte() {
+    var l = S.fatte || [], h = &#x27;&#x27;;
+    if (S.fatteErr) h = &#x27;&lt;div class=&quot;msg ko&quot; style=&quot;margin:12px&quot;&gt;&#x27; + esc(S.fatteErr) + &#x27;&lt;/div&gt;&#x27;;
+    else if (S.fatteCarico &amp;&amp; !l.length) h = &#x27;&lt;div class=&quot;vuoto&quot;&gt;&lt;div class=&quot;spinner&quot;&gt;&lt;/div&gt;&lt;/div&gt;&#x27;;
+    else if (!l.length) h = &#x27;&lt;div class=&quot;vuoto&quot;&gt;Nessun report da confermare&#x27; + ($(&#x27;ispettore&#x27;).value ? &#x27; per questo ispettore&#x27; : &#x27;&#x27;) + &#x27;.&lt;/div&gt;&#x27;;
+    if (l.length) h += &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-brand conferma-tutti&quot; id=&quot;btnConfermaTutti&quot;&gt;Conferma tutti (&#x27; + l.length + &#x27;)&lt;/button&gt;&#x27;;
+    h += l.map(function (x, i) {
+      return &#x27;&lt;button type=&quot;button&quot; class=&quot;opt fatta&quot; data-f=&quot;&#x27; + i + &#x27;&quot;&gt;&lt;span class=&quot;tx&quot;&gt;&lt;b&gt;&#x27; + esc(x.modello) + &#x27; · S/N &#x27; + esc(x.seriale) + &#x27;&lt;/b&gt;&#x27; +
+        &#x27;&lt;small&gt;&#x27; + esc(x.cliente) + &#x27; · &#x27; + esc(x.data) + (x.ora ? &#x27; ore &#x27; + esc(x.ora.slice(11)) : &#x27;&#x27;) + &#x27;&lt;/small&gt;&lt;/span&gt;&#x27; + pillEsito(x.esito) + &#x27;&lt;/button&gt;&#x27;;
+    }).join(&#x27;&#x27;);
+    $(&#x27;fatteLista&#x27;).innerHTML = h;
+    if ($(&#x27;btnConfermaTutti&#x27;)) $(&#x27;btnConfermaTutti&#x27;).addEventListener(&#x27;click&#x27;, function () { chiediConferma(S.fatte.slice()); });
+  }
+
+  /** Conferma: i PDF passano in REPORT TEMPORANEI di magazzino e non si possono più modificare. */
+  function chiediConferma(lista) {
+    if (!lista.length) return;
+    var uno = lista.length === 1;
+    dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--brand-soft);color:var(--brand)&quot;&gt;✔&lt;/div&gt;&#x27; +
+      &#x27;&lt;h3&gt;&#x27; + (uno ? &#x27;Confermare il report?&#x27; : &#x27;Confermare &#x27; + lista.length + &#x27; report?&#x27;) + &#x27;&lt;/h3&gt;&#x27; +
+      (uno ? &#x27;&lt;p&gt;&#x27; + esc(lista[0].modello) + &#x27; · S/N &#x27; + esc(lista[0].seriale) + &#x27; · &#x27; + esc(lista[0].cliente) + &#x27;&lt;/p&gt;&#x27; : &#x27;&#x27;) +
+      &#x27;&lt;p&gt;&#x27; + (uno ? &#x27;Il PDF va&#x27; : &#x27;I PDF vanno&#x27;) + &#x27; nella cartella REPORT TEMPORANEI di magazzino. Dopo non si &#x27; + (uno ? &#x27;può&#x27; : &#x27;possono&#x27;) + &#x27; più modificare né cancellare.&lt;/p&gt;&#x27; +
+      &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn-brand&quot; id=&quot;fConfOk&quot;&gt;Sì, conferma&lt;/button&gt;&#x27; +
+      &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;fConfNo&quot;&gt;Annulla&lt;/button&gt;&lt;/div&gt;&#x27;);
+    $(&#x27;fConfNo&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+    $(&#x27;fConfOk&#x27;).addEventListener(&#x27;click&#x27;, function () {
+      dialogo(&#x27;&lt;div class=&quot;spinner&quot;&gt;&lt;/div&gt;&lt;h3&gt;Invio a magazzino…&lt;/h3&gt;&#x27;);
+      run(&#x27;confermaIspezioni&#x27;, lista.map(function (x) { return x.nomeFile; })).then(function (r) {
+        if (lista.some(function (x) { return x.nomeFile === S.modifica; })) nuova(&#x27;tutto&#x27;);
+        var err = (r &amp;&amp; r.errori) || [];
+        dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--&#x27; + (err.length ? &#x27;wait&#x27; : &#x27;ok&#x27;) + &#x27;-bg);color:var(--&#x27; + (err.length ? &#x27;wait&#x27; : &#x27;ok&#x27;) + &#x27;)&quot;&gt;&#x27; + (err.length ? &#x27;!&#x27; : &#x27;✔&#x27;) + &#x27;&lt;/div&gt;&#x27; +
+          &#x27;&lt;h3&gt;&#x27; + (r.confermati === 1 ? &#x27;1 report confermato&#x27; : r.confermati + &#x27; report confermati&#x27;) + &#x27;&lt;/h3&gt;&#x27; +
+          (err.length ? &#x27;&lt;p&gt;Non confermati:&lt;/p&gt;&lt;p&gt;&#x27; + err.map(esc).join(&#x27;&lt;br&gt;&#x27;) + &#x27;&lt;/p&gt;&#x27; : &#x27;&lt;p&gt;Sono nella cartella REPORT TEMPORANEI di magazzino.&lt;/p&gt;&#x27;) +
+          &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;btnChiudi&quot;&gt;Chiudi&lt;/button&gt;&lt;/div&gt;&#x27;);
+        $(&#x27;btnChiudi&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+        aggiornaFatte();
+      }).catch(function (e) { erroreDialogo(&#x27;Conferma non riuscita&#x27;, e); aggiornaFatte(); });
+    });
+  }
+
+  function sceltaFatta(i) {
+    var x = S.fatte[i]; if (!x) return;
+    dialogo(&#x27;&lt;h3&gt;&#x27; + esc(x.modello) + &#x27; · S/N &#x27; + esc(x.seriale) + &#x27;&lt;/h3&gt;&lt;p&gt;&#x27; + esc(x.cliente) + &#x27; · &#x27; + esc(x.data) + &#x27;&lt;/p&gt;&#x27; +
+      &#x27;&lt;p&gt;Esito: &#x27; + pillEsito(x.esito) + &#x27;&lt;/p&gt;&lt;div class=&quot;actions&quot;&gt;&#x27; +
+      &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-brand&quot; id=&quot;fConf&quot;&gt;Conferma e invia a magazzino&lt;/button&gt;&#x27; +
+      &#x27;&lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;fMod&quot;&gt;Modifica&lt;/button&gt;&#x27; +
+      &#x27;&lt;a href=&quot;&#x27; + esc(x.pdfUrl) + &#x27;&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot; style=&quot;background:var(--bg);color:var(--ink)&quot;&gt;Apri il PDF&lt;/a&gt;&#x27; +
+      &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-ko&quot; id=&quot;fDel&quot;&gt;Cancella&lt;/button&gt;&#x27; +
+      &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;fAnn&quot;&gt;Annulla&lt;/button&gt;&lt;/div&gt;&#x27;);
+    $(&#x27;fConf&#x27;).addEventListener(&#x27;click&#x27;, function () { chiediConferma([x]); });
+    $(&#x27;fMod&#x27;).addEventListener(&#x27;click&#x27;, function () { modificaFatta(x); });
+    $(&#x27;fDel&#x27;).addEventListener(&#x27;click&#x27;, function () { confermaCancella(x); });
+    $(&#x27;fAnn&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+  }
+
+  function erroreDialogo(titolo, err) {
+    dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--ko-bg);color:var(--ko)&quot;&gt;!&lt;/div&gt;&lt;h3&gt;&#x27; + esc(titolo) + &#x27;&lt;/h3&gt;&#x27; +
+      &#x27;&lt;p&gt;&#x27; + esc(msgErr(err)) + &#x27;&lt;/p&gt;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;btnChiudi&quot;&gt;Chiudi&lt;/button&gt;&lt;/div&gt;&#x27;);
+    $(&#x27;btnChiudi&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+  }
+
+  function modificaFatta(x) {
+    dialogo(&#x27;&lt;div class=&quot;spinner&quot;&gt;&lt;/div&gt;&lt;h3&gt;Apro l’ispezione…&lt;/h3&gt;&#x27;);
+    run(&#x27;apriIspezione&#x27;, x.nomeFile).then(function (p) {
+      chiudiFatte();
+      caricaNelModulo(p, x);
+    }).catch(function (e) { erroreDialogo(&#x27;Non si può modificare&#x27;, e); aggiornaFatte(); });
+  }
+
+  function caricaNelModulo(p, x) {
+    nuova(&#x27;tutto&#x27;);
+    S.durataToccata = true;
+    setVal(&#x27;categoria&#x27;, p.categoria || &#x27;&#x27;, true);
+    setVal(&#x27;cliente&#x27;, p.cliente || &#x27;&#x27;, true);
+    setVal(&#x27;produttore&#x27;, p.produttore || &#x27;&#x27;, true);
+    setVal(&#x27;modello&#x27;, p.modello || &#x27;&#x27;, true);
+    $(&#x27;utilizzatore&#x27;).value = p.utilizzatore || &#x27;&#x27;;
+    $(&#x27;seriale&#x27;).value = p.seriale || &#x27;&#x27;;
+    $(&#x27;nfc&#x27;).value = p.nfc || &#x27;&#x27;;
+    $(&#x27;dataProduzione&#x27;).value = p.dataProduzione || &#x27;&#x27;;
+    $(&#x27;primoDiverso&#x27;).checked = !!p.primoUtilizzoDiverso;
+    $(&#x27;boxPrimo&#x27;).hidden = !$(&#x27;primoDiverso&#x27;).checked;
+    $(&#x27;dataPrimo&#x27;).value = p.dataPrimoUtilizzo || &#x27;&#x27;;
+    if (p.durata) $(&#x27;durata&#x27;).value = p.durata;
+    if (p.mesi) $(&#x27;mesi&#x27;).value = p.mesi;
+    if (p.dataIspezione) $(&#x27;dataIspezione&#x27;).value = p.dataIspezione;
+    $(&#x27;note&#x27;).value = p.note || &#x27;&#x27;;
+    if (p.ispettore &amp;&amp; Array.prototype.some.call($(&#x27;ispettore&#x27;).options, function (o) { return o.value === p.ispettore; })) $(&#x27;ispettore&#x27;).value = p.ispettore;
+    S.risposte = {};
+    (p.controlli || []).forEach(function (c) { if (c.esito) S.risposte[c.offset] = c.esito; });
+    S.esitoManuale = p.esitoManuale || &#x27;&#x27;;
+    S.foto = p.foto || [];
+    renderControlli();
+    renderFoto();
+    S.modifica = p.nomeFile;
+    $(&#x27;bannerTesto&#x27;).innerHTML = &#x27;Stai &lt;b&gt;modificando&lt;/b&gt; &#x27; + esc((x &amp;&amp; x.modello) || p.modello) + &#x27; · S/N &#x27; + esc(p.seriale) + &#x27;. Salvando, riga e PDF vengono sostituiti.&#x27;;
+    $(&#x27;bannerMod&#x27;).hidden = false;
+    $(&#x27;btnSalva&#x27;).textContent = &#x27;Salva modifiche&#x27;;
+    [&#x27;2&#x27;, &#x27;3&#x27;, &#x27;4&#x27;].forEach(function (n) { apriSez(n, false); });
+    aggiorna();
+    window.scrollTo({ top: 0, behavior: &#x27;smooth&#x27; });
+  }
+
+  function fineModifica() {
+    S.modifica = &#x27;&#x27;;
+    $(&#x27;bannerMod&#x27;).hidden = true;
+    $(&#x27;btnSalva&#x27;).textContent = &#x27;Salva e genera PDF&#x27;;
+  }
+
+  function confermaCancella(x) {
+    dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--ko-bg);color:var(--ko)&quot;&gt;!&lt;/div&gt;&lt;h3&gt;Cancellare l’ispezione?&lt;/h3&gt;&#x27; +
+      &#x27;&lt;p&gt;&#x27; + esc(x.modello) + &#x27; · S/N &#x27; + esc(x.seriale) + &#x27; · &#x27; + esc(x.cliente) + &#x27;&lt;/p&gt;&#x27; +
+      &#x27;&lt;p&gt;Vengono cancellati la riga nel DATABASE e il PDF. Non si può annullare.&lt;/p&gt;&#x27; +
+      &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn-ko-pieno&quot; id=&quot;fDelOk&quot;&gt;Sì, cancella&lt;/button&gt;&#x27; +
+      &#x27;&lt;button type=&quot;button&quot; class=&quot;btn-ghost&quot; id=&quot;fDelNo&quot;&gt;Annulla&lt;/button&gt;&lt;/div&gt;&#x27;);
+    $(&#x27;fDelNo&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+    $(&#x27;fDelOk&#x27;).addEventListener(&#x27;click&#x27;, function () {
+      dialogo(&#x27;&lt;div class=&quot;spinner&quot;&gt;&lt;/div&gt;&lt;h3&gt;Cancello…&lt;/h3&gt;&#x27;);
+      run(&#x27;eliminaIspezione&#x27;, x.nomeFile).then(function () {
+        if (S.modifica === x.nomeFile) nuova(&#x27;tutto&#x27;);
+        dialogo(&#x27;&lt;div class=&quot;big-ico&quot; style=&quot;background:var(--ok-bg);color:var(--ok)&quot;&gt;✔&lt;/div&gt;&lt;h3&gt;Ispezione cancellata&lt;/h3&gt;&#x27; +
+          &#x27;&lt;div class=&quot;actions&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;btn&quot; id=&quot;btnChiudi&quot;&gt;Chiudi&lt;/button&gt;&lt;/div&gt;&#x27;);
+        $(&#x27;btnChiudi&#x27;).addEventListener(&#x27;click&#x27;, chiudiDialogo);
+        aggiornaFatte();
+      }).catch(function (e) { erroreDialogo(&#x27;Cancellazione non riuscita&#x27;, e); aggiornaFatte(); });
+    });
+  }
+
+  function dialogo(html) { $(&#x27;dialog&#x27;).innerHTML = html; $(&#x27;overlay&#x27;).hidden = false; }
+  function chiudiDialogo() { $(&#x27;overlay&#x27;).hidden = true; }
+  function mostraMsg(tipo, html) { $(&#x27;risultati&#x27;).innerHTML = &#x27;&lt;div class=&quot;msg &#x27; + tipo + &#x27;&quot;&gt;&#x27; + html + &#x27;&lt;/div&gt;&#x27;; }
+
+  init();
+})();
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</textarea></div>
+<p class="note">Per aggiornare l'app in futuro: modifica il codice e usa <b>Esegui il deployment → Gestisci deployment → Modifica → Nuova versione</b>, così l'URL resta lo stesso.</p>
+</main>
+<script>
+document.querySelectorAll('button[data-t]').forEach(function(b){
+  b.addEventListener('click',function(){
+    var t=document.getElementById(b.getAttribute('data-t'));
+    var done=function(){b.textContent='Copiato ✓';setTimeout(function(){b.textContent='Copia';},2000);};
+    var fallback=function(){t.focus();t.select();try{document.execCommand('copy');done();}catch(e){b.textContent='Premi Ctrl+C';}};
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).then(done,fallback);}else fallback();
+  });
+});
+</script></body></html>
