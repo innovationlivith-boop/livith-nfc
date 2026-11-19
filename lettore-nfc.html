@@ -4,13 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>Lettore NFC – Livith</title>
+<title>Lettore – Livith</title>
 <style>
   :root { --brand: #e8771e; --ink: #1d232b; --muted: #6b7280; --bg: #f3f4f6; --ok: #15803d; --ok-bg: #dcfce7; --ko: #b91c1c; --ko-bg: #fee2e2; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  [hidden] { display: none !important; }
+  button { font: inherit; font-weight: 700; border: 0; border-radius: 12px; height: 52px; cursor: pointer; }
+  .pieno { background: var(--brand); color: #fff; }
+  .vuoto { background: #fff; color: var(--ink); border: 1.5px solid #e3e5e8; }
+  .scuro { background: #1d232b; color: #fff; }
+
+  /* ---- NFC ---- */
+  #nfcBox { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
     padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); text-align: center; }
   .brand { font-weight: 800; font-size: 20px; margin-bottom: 18px; }
   .brand span { color: var(--brand); }
@@ -23,51 +30,94 @@
   @keyframes onda { 0% { transform: scale(.3); opacity: .9; } 100% { transform: scale(1); opacity: 0; } }
   .anim svg { position: absolute; left: 50%; top: 50%; width: 62px; height: 100px; margin: -50px 0 0 -31px; animation: avvicina 1.8s ease-in-out infinite; }
   @keyframes avvicina { 0%, 100% { transform: translateY(8px) rotate(-10deg); } 50% { transform: translateY(-8px) rotate(-10deg); } }
-  .ferma .r, .ferma svg { animation: none; }
-  .ferma .r { opacity: 0; }
   .esito { width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; margin: 40px auto 18px; font-size: 42px; font-weight: 800; }
   .esito.ok { background: var(--ok-bg); color: var(--ok); }
   .esito.ko { background: var(--ko-bg); color: var(--ko); }
   .codice { font: 600 17px ui-monospace, Menlo, Consolas, monospace; color: var(--ink); margin-top: 6px; word-break: break-all; }
   .azioni { display: grid; gap: 10px; width: 100%; max-width: 340px; margin-top: 26px; }
-  button { font: inherit; font-weight: 700; border: 0; border-radius: 12px; height: 52px; cursor: pointer; }
-  .pieno { background: var(--brand); color: #fff; }
-  .vuoto { background: #fff; color: var(--ink); border: 1.5px solid #e3e5e8; }
-  [hidden] { display: none !important; }
+
+  /* ---- Fotocamera ---- */
+  #camBox { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #camBox video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .mirino { position: relative; width: min(68vw, 320px); aspect-ratio: 1; border-radius: 18px;
+    border: 3px solid rgba(255,255,255,.9); box-shadow: 0 0 0 100vmax rgba(0,0,0,.45); overflow: hidden; }
+  .mirino i { position: absolute; left: 6%; right: 6%; height: 3px; border-radius: 2px; background: var(--brand);
+    box-shadow: 0 0 12px var(--brand); animation: scansione 1.6s ease-in-out infinite alternate; }
+  @keyframes scansione { from { top: 8%; } to { top: 90%; } }
+  .mirino.letto { border-color: #4ade80; }
+  .mirino.letto i { display: none; }
+  .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+  .flash.on { animation: flash .35s ease-out; }
+  @keyframes flash { 0% { opacity: .8; } 100% { opacity: 0; } }
+  .cam-testo { position: relative; color: #fff; margin: 18px 20px 0; font-weight: 600; text-align: center;
+    text-shadow: 0 1px 3px #000; min-height: 44px; }
+  .cam-codice { position: relative; color: #4ade80; font: 600 15px ui-monospace, Menlo, Consolas, monospace; margin: 6px 20px 0; word-break: break-all; text-align: center; }
+  .cam-azioni { position: absolute; left: 16px; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); display: flex; gap: 10px; }
+  .cam-azioni button { flex: 1; }
 </style>
 </head>
 <body>
-<main>
-  <div class="brand">Livit<span>h</span> · Ispezioni DPI</div>
 
+<!-- ===== NFC ===== -->
+<main id="nfcBox" hidden>
+  <div class="brand">Livit<span>h</span> · Ispezioni DPI</div>
   <div class="anim" id="anim">
     <span class="r"></span><span class="r r2"></span><span class="r r3"></span>
     <svg viewBox="0 0 50 80" aria-hidden="true"><rect x="3" y="3" width="44" height="74" rx="9" fill="#fff" stroke="currentColor" stroke-width="4"/>
       <path d="M18 30a8 8 0 0 1 0 14M24 25a15 15 0 0 1 0 24M30 20a22 22 0 0 1 0 34" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/></svg>
   </div>
   <div class="esito" id="esito" hidden></div>
-
   <h1 id="titolo">Avvicina il telefono al tag NFC</h1>
   <p id="testo">Appoggia il retro del telefono sul tag e tienilo fermo un attimo.</p>
   <div class="codice" id="codice"></div>
-
   <div class="azioni">
     <button type="button" class="pieno" id="btnAvvia" hidden>Attiva il lettore NFC</button>
     <button type="button" class="vuoto" id="btnTorna">Annulla e torna all'app</button>
   </div>
 </main>
 
+<!-- ===== Fotocamera (DataMatrix) ===== -->
+<div id="camBox" hidden>
+  <video id="video" autoplay playsinline webkit-playsinline muted></video>
+  <div class="mirino" id="mirino"><i></i></div>
+  <div class="flash" id="flash"></div>
+  <div class="cam-testo" id="camTesto">Avvio la fotocamera…</div>
+  <div class="cam-codice" id="camCodice"></div>
+  <div class="cam-azioni">
+    <button type="button" class="pieno" id="btnScatta">Scatta</button>
+    <button type="button" class="scuro" id="btnAnnullaCam">Annulla</button>
+  </div>
+</div>
+
 <script>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var par = new URLSearchParams(location.search);
+  var modo = par.get('modo') === 'cam' ? 'cam' : 'nfc';
   var campo = par.get('campo') === 'nfc' ? 'nfc' : 'q';
   var ritorno = par.get('ritorno') || '';
   if (!/^https:\/\/script\.google\.com\//.test(ritorno)) ritorno = ''; // si torna solo all'app di Google
-  var ctrl = null, finito = false;
+  var finito = false;
 
-  function stato(tipo, titolo, testo) {
+  /** Rimanda il codice all'app (o annulla) e chiude questa pagina. */
+  function torna(valore) {
+    var aperto = window.opener && !window.opener.closed;
+    if (aperto) {
+      try {
+        window.opener.postMessage(valore ? { tipo: 'livith-nfc', valore: valore, campo: campo, fonte: modo } : { tipo: 'livith-nfc-annulla' }, '*');
+        setTimeout(function () { window.close(); }, valore ? 700 : 50);
+      } catch (e) { aperto = false; }
+    }
+    if (!aperto) {
+      if (ritorno) location.href = ritorno + (valore ? '?nfc=' + encodeURIComponent(valore) + '&campo=' + campo + '&fonte=' + modo : '');
+      else history.back();
+    }
+  }
+
+  /* ================= NFC ================= */
+  var ctrl = null;
+  function statoNfc(tipo, titolo, testo) {
     $('anim').hidden = tipo !== 'attesa';
     $('esito').hidden = tipo === 'attesa';
     $('esito').className = 'esito ' + (tipo === 'ok' ? 'ok' : 'ko');
@@ -75,63 +125,169 @@
     $('titolo').textContent = titolo;
     $('testo').textContent = testo || '';
   }
-
-  function torna(valore) {
-    var aperto = window.opener && !window.opener.closed;
-    if (aperto) {
-      try {
-        window.opener.postMessage(valore ? { tipo: 'livith-nfc', valore: valore, campo: campo } : { tipo: 'livith-nfc-annulla' }, '*');
-        setTimeout(function () { window.close(); }, valore ? 700 : 50);
-      } catch (e) { aperto = false; }
-    }
-    if (!aperto) {
-      if (ritorno) location.href = ritorno + (valore ? '?nfc=' + encodeURIComponent(valore) + '&campo=' + campo : '');
-      else history.back();
-    }
-    // se la scheda non si chiude da sola
-    setTimeout(function () { $('btnTorna').textContent = 'Torna all\'app'; }, 1500);
-  }
-
-  function avvia() {
+  function avviaNfc() {
     $('btnAvvia').hidden = true;
-    stato('attesa', 'Avvicina il telefono al tag NFC', 'Appoggia il retro del telefono sul tag e tienilo fermo un attimo.');
+    statoNfc('attesa', 'Avvicina il telefono al tag NFC', 'Appoggia il retro del telefono sul tag e tienilo fermo un attimo.');
     try {
       ctrl = new AbortController();
       var r = new NDEFReader();
       r.onreading = function (ev) {
         if (finito) return;
         var v = String(ev.serialNumber || '').replace(/:/g, '').toLowerCase();
-        if (!v) { stato('ko', 'Tag senza codice', 'Questo tag non comunica il numero di serie: prova con un altro.'); return; }
+        if (!v) { statoNfc('ko', 'Tag senza codice', 'Questo tag non comunica il numero di serie: prova con un altro.'); return; }
         finito = true;
         try { ctrl.abort(); } catch (e) { /* ignora */ }
         if (navigator.vibrate) navigator.vibrate(120);
-        stato('ok', 'Tag letto', 'Torno all\'app…');
+        statoNfc('ok', 'Tag letto', 'Torno all\'app…');
         $('codice').textContent = v;
         torna(v);
       };
-      r.onreadingerror = function () { stato('attesa', 'Tag non letto bene', 'Riprova: tieni il telefono fermo sul tag.'); };
+      r.onreadingerror = function () { statoNfc('attesa', 'Tag non letto bene', 'Riprova: tieni il telefono fermo sul tag.'); };
       r.scan({ signal: ctrl.signal }).catch(function (e) {
-        if (e && e.name === 'NotAllowedError') {
-          stato('ko', 'Serve il permesso NFC', 'Tocca il pulsante qui sotto e consenti l\'uso dell\'NFC.');
-          $('btnAvvia').hidden = false;
-        } else {
-          stato('ko', 'NFC non disponibile', (e && e.message ? e.message + '. ' : '') + 'Controlla che l\'NFC sia attivo nelle impostazioni del telefono.');
-          $('btnAvvia').hidden = false;
-        }
+        statoNfc('ko', e && e.name === 'NotAllowedError' ? 'Serve il permesso NFC' : 'NFC non disponibile',
+          e && e.name === 'NotAllowedError' ? 'Tocca il pulsante qui sotto e consenti l\'uso dell\'NFC.' : 'Controlla che l\'NFC sia attivo nelle impostazioni del telefono.');
+        $('btnAvvia').hidden = false;
       });
     } catch (e) {
-      stato('ko', 'NFC non disponibile', 'Riprova con il pulsante qui sotto.');
+      statoNfc('ko', 'NFC non disponibile', 'Riprova con il pulsante qui sotto.');
       $('btnAvvia').hidden = false;
     }
   }
 
-  $('btnAvvia').addEventListener('click', avvia);
-  $('btnTorna').addEventListener('click', function () { try { if (ctrl) ctrl.abort(); } catch (e) { /* ignora */ } torna(''); });
+  /* ============== Fotocamera / DataMatrix ============== */
+  var stream = null, decoder = null, inLettura = false, giro = 0;
+  var ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
 
-  if (!('NDEFReader' in window)) {
-    stato('ko', 'Lettura NFC non supportata', 'Serve Chrome su un telefono Android con NFC attivo.');
+  function caricaZxing() {
+    if (window.ZXing) return Promise.resolve();
+    return new Promise(function (res, rej) {
+      var sc = document.createElement('script');
+      sc.src = ZXING_URL;
+      sc.onload = function () { res(); };
+      sc.onerror = function () { rej(new Error('Non riesco a caricare il lettore di codici: controlla la connessione.')); };
+      document.head.appendChild(sc);
+    });
+  }
+  /** Funzione canvas -> Promise(testo | ''): BarcodeDetector del telefono se c'è, altrimenti ZXing. */
+  function preparaDecoder() {
+    if (decoder) return Promise.resolve(decoder);
+    var nativo = ('BarcodeDetector' in window) ? BarcodeDetector.getSupportedFormats().then(function (f) {
+      if (f.indexOf('data_matrix') < 0) return null;
+      return new BarcodeDetector({ formats: f.filter(function (x) { return ['data_matrix', 'qr_code', 'aztec', 'pdf417', 'code_128', 'code_39'].indexOf(x) >= 0; }) });
+    }).catch(function () { return null; }) : Promise.resolve(null);
+    return nativo.then(function (det) {
+      if (det) {
+        decoder = function (c) { return det.detect(c).then(function (r) { return r.length ? r[0].rawValue : ''; }).catch(function () { return ''; }); };
+        return decoder;
+      }
+      return caricaZxing().then(function () {
+        var hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.QR_CODE]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        var reader = new ZXing.MultiFormatReader();
+        reader.setHints(hints);
+        decoder = function (c) {
+          try { return Promise.resolve(reader.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(c)))).getText()); }
+          catch (e) { return Promise.resolve(''); }
+        };
+        return decoder;
+      });
+    });
+  }
+
+  /** Copia un pezzo del video su un canvas: quota = parte centrale (1 = tutto), max = lato massimo in pixel. */
+  function fotogramma(quota, max) {
+    var v = $('video'), w = v.videoWidth, h = v.videoHeight;
+    if (!w || !h) return null;
+    var lw = quota < 1 ? Math.min(w, h) * quota : w, lh = quota < 1 ? lw : h;
+    var k = Math.min(1, max / Math.max(lw, lh));
+    var c = document.createElement('canvas');
+    c.width = Math.round(lw * k); c.height = Math.round(lh * k);
+    c.getContext('2d').drawImage(v, (w - lw) / 2, (h - lh) / 2, lw, lh, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  function avviaCam() {
+    $('camTesto').textContent = 'Avvio la fotocamera…';
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      $('camTesto').textContent = 'Questo browser non dà accesso alla fotocamera.';
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+      .then(function (st) {
+        stream = st;
+        var v = $('video');
+        v.muted = true;
+        v.setAttribute('playsinline', '');
+        v.srcObject = st;
+        var p = v.play(); if (p && p.catch) p.catch(function () { /* ignora */ });
+        $('camTesto').textContent = 'Inquadra il codice DataMatrix nel riquadro';
+        return preparaDecoder().then(function () { ciclo(++giro); });
+      })
+      .catch(function (e) {
+        $('camTesto').textContent = e && e.name === 'NotAllowedError'
+          ? 'Permesso fotocamera negato: consentilo per questo sito nelle impostazioni del browser e riapri.'
+          : (e && e.message ? e.message : 'Fotocamera non disponibile.');
+      });
+  }
+
+  function ciclo(g) {
+    if (g !== giro || finito) return;
+    var c = fotogramma(0.75, 900);
+    if (!c || inLettura) { setTimeout(function () { ciclo(g); }, 200); return; }
+    inLettura = true;
+    decoder(c).then(function (t) {
+      inLettura = false;
+      if (t) letto(t); else setTimeout(function () { ciclo(g); }, 150);
+    });
+  }
+
+  /** «Scatta»: prende il fotogramma attuale a piena risoluzione e lo legge subito. */
+  function scatta() {
+    if (finito || !decoder) return;
+    $('flash').classList.remove('on'); void $('flash').offsetWidth; $('flash').classList.add('on');
+    var tentativi = [fotogramma(1, 1600), fotogramma(0.75, 1200), fotogramma(1, 2400)].filter(Boolean), i = 0;
+    $('camTesto').textContent = 'Leggo…';
+    (function prova() {
+      if (finito) return;
+      if (i >= tentativi.length) { $('camTesto').textContent = 'Codice non trovato: avvicinati, metti a fuoco e riprova.'; return; }
+      decoder(tentativi[i++]).then(function (t) { if (t) letto(t); else prova(); });
+    })();
+  }
+
+  function letto(t) {
+    if (finito) return;
+    finito = true;
+    giro++;
+    if (navigator.vibrate) navigator.vibrate(100);
+    $('mirino').classList.add('letto');
+    $('camTesto').textContent = 'Codice letto ✓ Torno all\'app…';
+    $('camCodice').textContent = t;
+    if (stream) setTimeout(function () { stream.getTracks().forEach(function (x) { x.stop(); }); }, 300);
+    torna(t);
+  }
+
+  /* ================= avvio ================= */
+  if (modo === 'cam') {
+    document.title = 'Fotocamera – Livith';
+    $('camBox').hidden = false;
+    $('btnScatta').addEventListener('click', scatta);
+    $('btnAnnullaCam').addEventListener('click', function () {
+      giro++;
+      if (stream) stream.getTracks().forEach(function (x) { x.stop(); });
+      torna('');
+    });
+    avviaCam();
   } else {
-    avvia();
+    document.title = 'Lettore NFC – Livith';
+    $('nfcBox').hidden = false;
+    $('btnAvvia').addEventListener('click', avviaNfc);
+    $('btnTorna').addEventListener('click', function () { try { if (ctrl) ctrl.abort(); } catch (e) { /* ignora */ } torna(''); });
+    if (!('NDEFReader' in window)) {
+      statoNfc('ko', 'Lettura NFC non supportata', 'Serve Chrome su un telefono Android con NFC attivo.');
+    } else {
+      avviaNfc();
+    }
   }
 })();
 </script>
