@@ -187,7 +187,8 @@
         var reader = new ZXing.MultiFormatReader();
         reader.setHints(hints);
         decoder = function (c) {
-          try { return Promise.resolve(reader.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(c)))).getText()); }
+          // hints a ogni lettura: senza, ZXing li azzera e smette di «provare più a fondo» (TRY_HARDER)
+          try { return Promise.resolve(reader.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(c))), hints).getText()); }
           catch (e) { return Promise.resolve(''); }
         };
         return decoder;
@@ -221,7 +222,7 @@
         v.setAttribute('playsinline', '');
         v.srcObject = st;
         var p = v.play(); if (p && p.catch) p.catch(function () { /* ignora */ });
-        $('camTesto').textContent = 'Inquadra il codice DataMatrix nel riquadro';
+        $('camTesto').textContent = 'Inquadra il codice: si legge da solo';
         return preparaDecoder().then(function () { ciclo(++giro); });
       })
       .catch(function (e) {
@@ -231,14 +232,19 @@
       });
   }
 
-  function ciclo(g) {
+  // Lettura automatica appena il codice è inquadrato: a ogni giro un'inquadratura diversa
+  // (riquadro centrale, tutta l'immagine, centro più stretto) così si leggono codici piccoli, grandi o non centrati.
+  var TAGLI_AUTO = [[0.75, 900], [1, 1280], [0.55, 720]];
+  function ciclo(g, passo) {
     if (g !== giro || finito) return;
-    var c = fotogramma(0.75, 900);
-    if (!c || inLettura) { setTimeout(function () { ciclo(g); }, 200); return; }
+    passo = passo || 0;
+    var tg = TAGLI_AUTO[passo % TAGLI_AUTO.length];
+    var c = fotogramma(tg[0], tg[1]);
+    if (!c || inLettura) { setTimeout(function () { ciclo(g, passo); }, 200); return; }
     inLettura = true;
     decoder(c).then(function (t) {
       inLettura = false;
-      if (t) letto(t); else setTimeout(function () { ciclo(g); }, 150);
+      if (t) letto(t); else setTimeout(function () { ciclo(g, passo + 1); }, 100);
     });
   }
 
